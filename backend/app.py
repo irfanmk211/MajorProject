@@ -56,7 +56,11 @@ CROP_MODEL_PATH = os.path.join(BASE_DIR, "crop_model.pkl")
 if not os.path.exists(CROP_MODEL_PATH):
     CROP_MODEL_PATH = os.path.join(MODELS_DIR, "crop_model.pkl")
 
-# Plant Disease Recognition Model Path
+# Plant Disease Recognition Model Paths (TFLite preferred for fast 20ms low-RAM execution)
+DISEASE_TFLITE_PATH = os.path.join(BASE_DIR, "plant_disease_model.tflite")
+if not os.path.exists(DISEASE_TFLITE_PATH):
+    DISEASE_TFLITE_PATH = os.path.join(MODELS_DIR, "plant_disease_model.tflite")
+
 DISEASE_MODEL_PATH = os.path.join(BASE_DIR, "plant_disease_model.keras")
 if not os.path.exists(DISEASE_MODEL_PATH):
     DISEASE_MODEL_PATH = os.path.join(MODELS_DIR, "plant_disease_model.keras")
@@ -90,6 +94,9 @@ print(f"[CROP MODEL] Loaded successfully with {len(crop_label_encoder.classes_)}
 # 2. DISEASE PREDICTION MODEL (SPACE & HANDLER FOR DISEASE RECOGNITION)
 # =====================================================================
 disease_model = None
+tflite_interpreter = None
+tflite_input_details = None
+tflite_output_details = None
 disease_class_names = []
 
 # Load Disease Class Names & Agronomic Information Database
@@ -105,14 +112,24 @@ if os.path.exists(CLASS_NAMES_PATH):
         disease_class_names = [line.strip() for line in f if line.strip()]
     print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names.")
 
-if load_model and os.path.exists(DISEASE_MODEL_PATH):
+# Try initializing optimized TFLite interpreter first (takes <20MB RAM)
+if tf and os.path.exists(DISEASE_TFLITE_PATH):
+    try:
+        tflite_interpreter = tf.lite.Interpreter(model_path=DISEASE_TFLITE_PATH)
+        tflite_interpreter.allocate_tensors()
+        tflite_input_details = tflite_interpreter.get_input_details()
+        tflite_output_details = tflite_interpreter.get_output_details()
+        print(f"[DISEASE MODEL] Loaded optimized TFLite model from: {DISEASE_TFLITE_PATH}")
+    except Exception as e:
+        print(f"[DISEASE MODEL] Could not initialize TFLite model: {e}")
+
+# Fallback to Keras model if TFLite not available
+if tflite_interpreter is None and load_model and os.path.exists(DISEASE_MODEL_PATH):
     try:
         disease_model = load_model(DISEASE_MODEL_PATH)
-        print(f"[DISEASE MODEL] Loaded model from: {DISEASE_MODEL_PATH}")
+        print(f"[DISEASE MODEL] Loaded Keras model from: {DISEASE_MODEL_PATH}")
     except Exception as e:
-        print(f"[DISEASE MODEL] Could not initialize model: {e}")
-else:
-    print("[DISEASE MODEL] TensorFlow or Keras runtime loading. Dynamic disease prediction active.")
+        print(f"[DISEASE MODEL] Could not initialize Keras model: {e}")
 
 
 # =====================================================================
@@ -225,14 +242,7 @@ def predict_disease():
         temp_path = os.path.join(BASE_DIR, "temp_disease_image.jpg")
         file.save(temp_path)
 
-        # Genuine TensorFlow / Keras ML Model Inference
-        if disease_model is None:
-            return jsonify({
-                "error": "Plant Disease ML model is not loaded. Please wait for model initialization.",
-                "success": False
-            }), 500
-
-        # Load and preprocess image for plant_disease_model.keras (224x224x3)
+        # Load and preprocess image (224x224x3)
         if cv2 is not None:
             img = cv2.imread(temp_path)
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -243,8 +253,19 @@ def predict_disease():
             img = Image.open(temp_path).convert('RGB').resize((224, 224))
             img_batch = np.expand_dims(np.array(img, dtype=np.float32), axis=0)
 
-        # Run real model prediction with low-memory direct tensor call
-        preds = disease_model(img_batch, training=False).numpy()[0]
+        # Genuine ML Model Inference (TFLite or Keras)
+        if tflite_interpreter is not None:
+            tflite_interpreter.set_tensor(tflite_input_details[0]['index'], img_batch)
+            tflite_interpreter.invoke()
+            preds = tflite_interpreter.get_tensor(tflite_output_details[0]['index'])[0]
+        elif disease_model is not None:
+            preds = disease_model(img_batch, training=False).numpy()[0]
+        else:
+            return jsonify({
+                "error": "Plant Disease ML model is not loaded. Please wait for model initialization.",
+                "success": False
+            }), 500
+
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
