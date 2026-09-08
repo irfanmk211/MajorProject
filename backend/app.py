@@ -28,12 +28,21 @@ except ImportError:
 
 # Initialize Flask App
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
+
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        res = jsonify({"status": "preflight_ok"})
+        res.headers["Access-Control-Allow-Origin"] = "*"
+        res.headers["Access-Control-Allow-Headers"] = "*"
+        res.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+        return res, 200
 
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    response.headers["Access-Control-Allow-Headers"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
     return response
 
@@ -120,8 +129,10 @@ def home():
 # ---------------------------------------------------------------------
 # CROP RECOMMENDATION ENDPOINT
 # ---------------------------------------------------------------------
-@app.route("/predict-crop", methods=["POST"])
+@app.route("/predict-crop", methods=["POST", "OPTIONS"])
 def predict_crop():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     try:
         data = request.get_json(force=True, silent=True) or {}
 
@@ -155,25 +166,29 @@ def predict_crop():
     except Exception as e:
         return jsonify({"error": f"Crop prediction error: {str(e)}"}), 400
 
-app.add_url_rule("/api/predict-crop", endpoint="api_predict_crop", view_func=predict_crop, methods=["POST"])
+app.add_url_rule("/api/predict-crop", endpoint="api_predict_crop", view_func=predict_crop, methods=["POST", "OPTIONS"])
 
 
 # ---------------------------------------------------------------------
 # IRRIGATION & WEATHER ENDPOINTS (FOR SOIL IRRIGATION PAGE)
 # ---------------------------------------------------------------------
-@app.route("/weather", methods=["GET"])
+@app.route("/weather", methods=["GET", "OPTIONS"])
 def weather():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     return jsonify({
         "temperature": sensor_data.get("temperature", 28) or 28,
         "humidity": sensor_data.get("humidity", 75) or 75,
         "city": "Udupi"
     })
 
-app.add_url_rule("/api/weather", endpoint="api_weather", view_func=weather, methods=["GET"])
+app.add_url_rule("/api/weather", endpoint="api_weather", view_func=weather, methods=["GET", "OPTIONS"])
 
 
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["POST", "OPTIONS"])
 def predict_irrigation():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     try:
         data = request.get_json(force=True, silent=True) or {}
         soil_moisture = data.get("soil_moisture", 0)
@@ -190,15 +205,17 @@ def predict_irrigation():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=predict_irrigation, methods=["POST"])
+app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=predict_irrigation, methods=["POST", "OPTIONS"])
 
 
 # ---------------------------------------------------------------------
 # DISEASE PREDICTION ENDPOINT (FULL FRONTEND INTEGRATION)
 # ---------------------------------------------------------------------
-@app.route("/predict-disease", methods=["POST"])
+@app.route("/predict-disease", methods=["POST", "OPTIONS"])
 def predict_disease():
     global disease_model
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     try:
         file = request.files.get("file") or request.files.get("image")
         if not file or file.filename == "":
@@ -226,8 +243,8 @@ def predict_disease():
             img = Image.open(temp_path).convert('RGB').resize((224, 224))
             img_batch = np.expand_dims(np.array(img, dtype=np.float32), axis=0)
 
-        # Run real model prediction
-        preds = disease_model.predict(img_batch)[0]
+        # Run real model prediction with low-memory direct tensor call
+        preds = disease_model(img_batch, training=False).numpy()[0]
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
@@ -251,6 +268,14 @@ def predict_disease():
             except Exception:
                 pass
 
+        # Free memory immediately
+        try:
+            del img_batch
+            del preds
+            gc.collect()
+        except Exception:
+            pass
+
         info_record = disease_info_db.get(label, {})
 
         return jsonify({
@@ -269,7 +294,7 @@ def predict_disease():
     except Exception as e:
         return jsonify({"error": f"Disease prediction error: {str(e)}", "success": False}), 500
 
-app.add_url_rule("/api/predict-disease", endpoint="api_predict_disease", view_func=predict_disease, methods=["POST"])
+app.add_url_rule("/api/predict-disease", endpoint="api_predict_disease", view_func=predict_disease, methods=["POST", "OPTIONS"])
 
 
 # ---------------------------------------------------------------------
