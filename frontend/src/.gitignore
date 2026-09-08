@@ -1,0 +1,11 @@
+node_modules/
+dist/
+backend/saved_model/
+public/saved_model.pb
+*.keras
+*.h5
+*.pb
+*.pkl
+*.joblib
+__pycache__/
+.env

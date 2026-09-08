@@ -1,0 +1,453 @@
+/* =========================
+   GLOBAL RESET
+========================= */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+/* =========================
+   🌿 LOGIN BACKGROUND
+========================= */
+.auth-bg {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* BACKGROUND SLIDER */
+.cinematic-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* EACH IMAGE LAYER */
+.bg-layer {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+
+  opacity: 0;
+  transform: scale(1.1);
+  transition: opacity 1.5s ease-in-out, transform 5s ease-in-out;
+}
+
+/* ACTIVE IMAGE */
+.bg-layer.active {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+/* DARK OVERLAY */
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1;
+}
+
+/* =========================
+   🌿 LOGIN CARD
+========================= */
+.auth-card {
+  position: relative;
+  z-index: 5; /* ✅ FIX */
+
+  width: 360px;
+  padding: 30px;
+  border-radius: 20px;
+
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(12px);
+
+  color: white;
+  text-align: center;
+
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+/* TITLE */
+.title {
+  margin-bottom: 5px;
+}
+
+.subtitle {
+  font-size: 13px;
+  opacity: 0.7;
+  margin-bottom: 20px;
+}
+
+/* INPUTS */
+input {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 10px;
+  border: none;
+  outline: none;
+}
+
+/* BUTTON */
+.btn.primary {
+  width: 100%;
+  padding: 12px;
+  background: #22c55e;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.btn.primary:hover {
+  background: #16a34a;
+}
+
+/* FORGOT */
+.forgot {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+/* =========================
+   🌿 SOCIAL LOGIN
+========================= */
+.social-box {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.social-btn {
+  flex: 1;
+  background: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.social-btn img {
+  width: 24px;
+}
+
+.social-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+}
+
+/* =========================
+   🌿 GOOGLE POPUP
+========================= */
+.google-popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  z-index: 9999; /* ✅ FIX */
+}
+
+.google-box {
+  width: 300px;
+  background: white;
+  color: black;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+
+  z-index: 10000; /* ✅ FIX */
+}
+
+.google-user {
+  padding: 10px;
+  margin: 8px 0;
+  background: #f1f1f1;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.google-user:hover {
+  background: #ddd;
+}
+
+.close-btn {
+  width: 100%;
+  padding: 8px;
+  margin-top: 10px;
+  background: #22c55e;
+  border: none;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* =========================
+   ✨ ANIMATION
+========================= */
+.fade {
+  animation: fadeIn 0.6s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* =========================
+   DASHBOARD BACKGROUND
+========================= */
+.dash-container {
+  min-height: 100vh;
+  padding: 20px;
+
+  background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)),
+              url("https://images.unsplash.com/photo-1500382017468-9049fed747ef");
+
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* HEADER */
+.dash-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* PROFILE */
+.profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.profile-icon {
+  width: 40px;
+  height: 40px;
+  background: #d1fae5;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-name {
+  color: white;
+}
+
+/* BELL */
+.bell {
+  font-size: 22px;
+  color: white;
+}
+
+/* PROFILE CARD */
+.profile-card {
+  position: absolute;
+  top: 70px;
+  left: 20px;
+  width: 260px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 15px;
+  padding: 15px;
+}
+
+/* HERO */
+.hero img {
+  width: 100%;
+  height: 350px;
+  object-fit: cover;
+  border-radius: 20px;
+  margin: 15px 0;
+}
+
+/* STATUS */
+.status-cards {
+  display: flex;
+  gap: 10px;
+}
+
+.status-card {
+  flex: 1;
+  background: rgba(255,255,255,0.9);
+  padding: 12px;
+  border-radius: 12px;
+  text-align: center;
+}
+
+/* FEATURES */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* 🔥 3 boxes per row */
+  gap: 10px;
+}
+.feature-card {
+  aspect-ratio: 1 / 1;   /* keep square */
+  padding: 6px;          /* 🔥 reduce padding */
+  border-radius: 12px;
+
+  background: rgba(255,255,255,0.95);
+  cursor: pointer;
+  transition: 0.3s;
+
+  box-shadow: 0 6px 15px rgba(0,0,0,0.15);
+}
+.feature-card img {
+  width: 100%;
+  height: 65%;   /* smaller image */
+  object-fit: cover;
+  border-radius: 8px;
+}
+.feature-card h4 {
+  font-size: 20px;   /* 🔥 smaller text */
+  margin-top: 4px;
+  text-align: center;
+}
+/* QUOTE */
+.quote-card {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 15px;
+  background: rgba(255,255,255,0.9);
+  text-align: center;
+  font-family: Verdana, Geneva, Tahoma, sans-serif;
+}
+/* 🌿 FULL PAGE BACKGROUND */
+.disease-page {
+  min-height: 100vh;
+
+  /* 🌿 Strong background */
+  background: linear-gradient(
+      rgba(0, 0, 0, 0.4),   /* dark overlay */
+      rgba(0, 0, 0, 0.4)
+    ),
+    url("https://tse1.mm.bing.net/th/id/OIP.uWzuvZ9NCKUGjQvrbk43sQHaFj?r=0&rs=1&pid=ImgDetMain&o=7&rm=3");
+
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+/* 🌿 MAIN CARD */
+.disease-card {
+  width: 380px;
+  padding: 30px;
+  border-radius: 20px;
+
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(15px);
+
+  text-align: center;
+  color: white;
+
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+/* TITLE */
+.subtitle {
+  font-size: 13px;
+  opacity: 0.7;
+  margin-bottom: 15px;
+}
+
+/* INPUT */
+input {
+  margin-top: 10px;
+  margin-bottom: 15px;
+}
+
+/* PREVIEW IMAGE */
+.preview-img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 15px;
+}
+
+/* BUTTON */
+.predict-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+
+  transition: 0.3s;
+}
+
+.predict-btn:hover {
+  transform: scale(1.05);
+}
+
+/* LOADER */
+.loader {
+  margin: 15px auto;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #22c55e;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+/* RESULT CARD */
+.result-card {
+  margin-top: 20px;
+  padding: 15px;
+  border-radius: 12px;
+
+  background: rgba(255,255,255,0.2);
+  backdrop-filter: blur(10px);
+}
+
+.result-card h3 {
+  margin-bottom: 5px;
+}
+
+.result-card p {
+  font-size: 14px;
+}/* IMAGE CONTAINER */
+.img-box {
+  width: 100%;
+  margin-top: 15px;
+  border-radius: 15px;
+  overflow: hidden;
+
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+/* IMAGE */
+.img-box img {
+  width: 100%;
+  height: 220px;   /* 👈 bigger image */
+  object-fit: cover;
+  display: block;
+}
