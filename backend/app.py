@@ -1,8 +1,11 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import json
 import numpy as np
 import pandas as pd
 import pickle
+import gc
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -14,6 +17,10 @@ except ImportError:
 
 try:
     import tensorflow as tf
+    try:
+        tf.config.set_visible_devices([], 'GPU')
+    except Exception:
+        pass
     from tensorflow.keras.models import load_model
 except ImportError:
     tf = None
@@ -21,7 +28,14 @@ except ImportError:
 
 # Initialize Flask App
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+    return response
 
 # Base Paths & Serialized Models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

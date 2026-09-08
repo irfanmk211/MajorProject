@@ -28,5 +28,5 @@ COPY . .
 # Expose port
 EXPOSE 5000
 
-# Run Flask backend server with Gunicorn WSGI
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
+# Run Flask backend server with lightweight Gunicorn worker configuration
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "180", "--worker-class", "gthread", "app:app"]
