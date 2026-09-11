@@ -46,25 +46,32 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
     return response
 
+def make_cors_response(data, status_code=200):
+    res = jsonify(data)
+    res.headers["Access-Control-Allow-Origin"] = "*"
+    res.headers["Access-Control-Allow-Headers"] = "*"
+    res.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+    return res, status_code
+
 @app.errorhandler(400)
 def bad_request(e):
-    return jsonify({"error": "Bad request", "details": str(e), "success": False}), 400
+    return make_cors_response({"error": "Bad request", "details": str(e), "success": False}, 400)
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({"error": "Endpoint not found", "success": False}), 404
+    return make_cors_response({"error": "Endpoint not found", "success": False}, 404)
 
 @app.errorhandler(405)
 def method_not_allowed(e):
-    return jsonify({"error": "Method not allowed", "success": False}), 405
+    return make_cors_response({"error": "Method not allowed", "success": False}, 405)
 
 @app.errorhandler(500)
 def server_error(e):
-    return jsonify({"error": "Internal server error", "details": str(e), "success": False}), 500
+    return make_cors_response({"error": "Internal server error", "details": str(e), "success": False}, 500)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    return jsonify({"error": "Unhandled server exception", "details": str(e), "success": False}), 500
+    return make_cors_response({"error": "Unhandled server exception", "details": str(e), "success": False}, 500)
 
 # Base Paths & Serialized Models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -451,6 +458,8 @@ def predict_disease():
         # Universal image normalization & format conversion
         try:
             pil_img = normalize_image(img_bytes)
+            # Downsample large smartphone photos to max 512x512 to prevent Render 512MB RAM OOM crash
+            pil_img.thumbnail((512, 512))
         except ValueError as ve:
             return jsonify({"error": str(ve), "success": False}), 400
 

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart';
 import '../providers/history_provider.dart';
 import '../providers/settings_provider.dart';
@@ -25,6 +26,18 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _pickImage(ImageSource source) async {
+    if (!kIsWeb && source == ImageSource.camera) {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Camera permission is required to take photos of plant leaves.')),
+          );
+        }
+        return;
+      }
+    }
+
     final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 85);
     if (pickedFile != null) {
       if (kIsWeb) {
@@ -77,18 +90,8 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
         history.addDiseaseRecord(label, confidence, treatment);
       }
     } catch (e) {
-      String cleanErr = e.toString();
-      if (cleanErr.startsWith('Exception: ')) {
-        cleanErr = cleanErr.replaceFirst('Exception: ', '');
-      }
-      if (cleanErr.startsWith('Disease prediction error: ')) {
-        cleanErr = cleanErr.replaceFirst('Disease prediction error: ', '');
-      }
-      if (cleanErr.startsWith('Exception: ')) {
-        cleanErr = cleanErr.replaceFirst('Exception: ', '');
-      }
       setState(() {
-        _errorMessage = cleanErr;
+        _errorMessage = e.toString();
       });
     } finally {
       setState(() {
@@ -214,10 +217,25 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
       children: [
         if (_errorMessage != null)
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
-            child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.red.shade300, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 28),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold, fontSize: 14, height: 1.3),
+                  ),
+                ),
+              ],
+            ),
           ),
         if (_result != null)
           Container(
