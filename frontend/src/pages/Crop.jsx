@@ -64,7 +64,7 @@ export default function Crop() {
         setResults(data);
       }
     } catch {
-      alert("Backend not connected. Start Flask server on port 5000.");
+      alert("Cloud server is currently waking up or busy. Please try again in a moment.");
     }
     setLoading(false);
   };

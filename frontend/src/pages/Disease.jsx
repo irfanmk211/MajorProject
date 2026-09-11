@@ -85,7 +85,7 @@ const handleUpload = async () => {
     }
   } catch (err) {
     console.error("Prediction error:", err);
-    alert("Backend error. Ensure Flask server is running on port 5000.");
+    alert("Cloud server is currently waking up or busy. Please try again in a moment.");
   } finally {
     setLoading(false);
   }
