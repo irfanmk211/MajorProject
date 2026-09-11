@@ -368,11 +368,13 @@ def validate_plant_image(pil_img):
         green_ratio = green_pixels / total_pixels
         skin_ratio = skin_pixels / total_pixels
 
-        if skin_ratio > 0.15:
-            return False, "Non-leaf image detected (Human skin or face detected). Please upload a clear photo of a plant leaf."
+        # Only reject if almost purely human skin/face with virtually zero leaf foliage
+        if skin_ratio > 0.60 and foliage_ratio < 0.05:
+            return False, "Human selfie/face detected. Please upload a clear photo of a crop or plant leaf."
 
-        if foliage_ratio < 0.20 and green_ratio < 0.15:
-            return False, "The uploaded image does not appear to be a plant leaf (insufficient leaf foliage). Please upload a clear, close-up photo of a plant leaf or crop."
+        # Only reject if virtually zero botanical or vegetation pixels (e.g. solid white wall, computer screen)
+        if foliage_ratio < 0.03 and green_ratio < 0.02 and skin_ratio < 0.05:
+            return False, "No plant leaf detected in the image. Please upload a clear photo of a crop or plant leaf."
 
         return True, "Valid plant image"
     except Exception:
