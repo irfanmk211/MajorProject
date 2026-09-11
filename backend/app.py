@@ -317,15 +317,53 @@ def validate_plant_image(pil_img):
         green_ratio = green_pixels / total_pixels
         skin_ratio = skin_pixels / total_pixels
 
-        if skin_ratio > 0.30 and foliage_ratio < 0.15:
-            return False, "Human skin/face detected. Please upload a clear image of a plant leaf or crop."
+        if skin_ratio > 0.25 and foliage_ratio < 0.20:
+            return False, "Non-leaf image detected (Human skin/face). Please upload a clear photo of a plant leaf."
 
-        if foliage_ratio < 0.08 and green_ratio < 0.05:
-            return False, "No plant leaf or crop detected in the image. Please upload a clear photo of a plant leaf."
+        if foliage_ratio < 0.12 and green_ratio < 0.08:
+            return False, "The uploaded image does not appear to be a plant leaf. Please upload a clear photo of a plant leaf or crop."
 
         return True, "Valid plant image"
     except Exception:
         return True, "Valid"
+
+
+# ---------------------------------------------------------------------
+# UNIVERSAL IMAGE FORMAT NORMALIZER (HANDLES ALL FORMATS & ORIENTATIONS)
+# ---------------------------------------------------------------------
+def normalize_image(img_bytes):
+    """
+    Universally converts any image format (JPEG, PNG with transparency,
+    WebP, BMP, TIFF, Grayscale, CMYK, Palette, truncated streams)
+    with automatic smartphone EXIF orientation correction into standard RGB.
+    """
+    import io
+    from PIL import Image, ImageOps, ImageFile
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+    try:
+        raw_img = Image.open(io.BytesIO(img_bytes))
+    except Exception as e:
+        raise ValueError(f"Corrupted or unsupported image file format: {str(e)}")
+
+    # 1. Correct EXIF Orientation (fixes rotated smartphone photos)
+    try:
+        raw_img = ImageOps.exif_transpose(raw_img)
+    except Exception:
+        pass
+
+    # 2. Handle transparency (RGBA, LA, Palette with alpha) by blending on white background
+    if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
+        alpha_img = raw_img.convert("RGBA")
+        background = Image.new("RGBA", alpha_img.size, (255, 255, 255, 255))
+        blended = Image.alpha_composite(background, alpha_img)
+        rgb_img = blended.convert("RGB")
+    elif raw_img.mode != "RGB":
+        rgb_img = raw_img.convert("RGB")
+    else:
+        rgb_img = raw_img
+
+    return rgb_img
 
 
 # ---------------------------------------------------------------------
@@ -366,10 +404,11 @@ def predict_disease():
                 "success": False
             }), 400
 
-        # In-memory Image Preprocessing (Thread-safe, Zero Disk Overhead)
-        import io
-        from PIL import Image
-        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        # Universal image normalization & format conversion
+        try:
+            pil_img = normalize_image(img_bytes)
+        except ValueError as ve:
+            return jsonify({"error": str(ve), "success": False}), 400
 
         # Botanical / Non-plant validation check
         is_plant, val_msg = validate_plant_image(pil_img)
@@ -400,10 +439,10 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check
-        if confidence < 20.0:
+        # Confidence threshold check for extreme noise/outliers
+        if confidence < 15.0:
             return jsonify({
-                "error": "Could not recognize a known plant disease on this image (confidence too low). Please provide a clearer, closer leaf image.",
+                "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
                 "is_leaf": False,
                 "success": False
             }), 400
