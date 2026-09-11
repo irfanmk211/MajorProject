@@ -46,6 +46,26 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
     return response
 
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad request", "details": str(e), "success": False}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint not found", "success": False}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "Method not allowed", "success": False}), 405
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"error": "Internal server error", "details": str(e), "success": False}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({"error": "Unhandled server exception", "details": str(e), "success": False}), 500
+
 # Base Paths & Serialized Models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
@@ -136,11 +156,27 @@ if tflite_interpreter is None and load_model and os.path.exists(DISEASE_MODEL_PA
 # 3. ROUTES & ENDPOINTS
 # =====================================================================
 
-@app.route("/")
-def home():
+@app.route("/", methods=["GET", "OPTIONS"])
+@app.route("/health", methods=["GET", "OPTIONS"])
+def health():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
     return jsonify({
         "status": "online",
-        "message": "AgroSmart AI Backend API is running successfully!"
+        "message": "AgroSmart AI Backend API is running successfully!",
+        "version": "2.0.0",
+        "models": {
+            "crop_recommendation": {
+                "loaded": crop_rf_model is not None,
+                "classes_count": len(crop_label_encoder.classes_) if crop_label_encoder else 0
+            },
+            "plant_disease": {
+                "tflite_loaded": tflite_interpreter is not None,
+                "keras_loaded": disease_model is not None,
+                "classes_count": len(disease_class_names),
+                "advisory_records": len(disease_info_db)
+            }
+        }
     })
 
 # ---------------------------------------------------------------------
@@ -153,24 +189,48 @@ def predict_crop():
     try:
         data = request.get_json(force=True, silent=True) or {}
 
-        # Handle { input: [...] } or list [...] or dict { N: ..., P: ... }
-        if isinstance(data, dict) and "input" in data:
-            values = data["input"]
-        elif isinstance(data, list):
-            values = data
-        elif isinstance(data, dict):
-            values = [data.get(f, 0) for f in crop_features]
-        else:
-            values = []
+        # Safe feature mapping dictionary
+        feature_map = {
+            "N": ["N", "n", "nitrogen", "Nitrogen"],
+            "P": ["P", "p", "phosphorus", "Phosphorus"],
+            "K": ["K", "k", "potassium", "Potassium"],
+            "temperature": ["temperature", "temp", "Temperature", "Temp"],
+            "humidity": ["humidity", "humid", "Humidity"],
+            "ph": ["ph", "pH", "Ph", "PH"],
+            "rainfall": ["rainfall", "rain", "Rainfall", "Rain"]
+        }
 
-        if not values or len(values) < 7:
-            return jsonify({"error": "Invalid input format. Expected 7 feature parameters."}), 400
+        values = []
+        if isinstance(data, list):
+            values = [float(v) for v in data[:7]]
+        elif isinstance(data, dict):
+            if "input" in data and isinstance(data["input"], list):
+                values = [float(v) for v in data["input"][:7]]
+            elif "features" in data and isinstance(data["features"], list):
+                values = [float(v) for v in data["features"][:7]]
+            else:
+                for feat in crop_features:
+                    found_val = 0.0
+                    aliases = feature_map.get(feat, [feat])
+                    for k in aliases:
+                        if k in data and data[k] not in (None, ""):
+                            try:
+                                found_val = float(data[k])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                    values.append(found_val)
+
+        if len(values) < 7:
+            return jsonify({
+                "error": "Invalid input. Expected 7 parameters: N, P, K, temperature, humidity, pH, rainfall.",
+                "success": False
+            }), 400
 
         df_input = pd.DataFrame([values[:7]], columns=crop_features)
         probabilities = crop_rf_model.predict_proba(df_input)[0]
 
         top5_indices = np.argsort(probabilities)[::-1][:5]
-
         result = []
         for idx in top5_indices:
             result.append({
@@ -181,7 +241,7 @@ def predict_crop():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"error": f"Crop prediction error: {str(e)}"}), 400
+        return jsonify({"error": f"Crop prediction error: {str(e)}", "success": False}), 400
 
 app.add_url_rule("/api/predict-crop", endpoint="api_predict_crop", view_func=predict_crop, methods=["POST", "OPTIONS"])
 
@@ -208,9 +268,9 @@ def predict_irrigation():
         return jsonify({"status": "ok"}), 200
     try:
         data = request.get_json(force=True, silent=True) or {}
-        soil_moisture = data.get("soil_moisture", 0)
-        temp = data.get("temperature", 30)
-        humidity = data.get("humidity", 60)
+        soil_moisture = float(data.get("soil_moisture", 0) or 0)
+        temp = float(data.get("temperature", 30) or 30)
+        humidity = float(data.get("humidity", 60) or 60)
 
         # Irrigation decision logic
         needs_irrigation = 1 if (soil_moisture < 35 or humidity < 50 or temp > 35) else 0
@@ -220,40 +280,57 @@ def predict_irrigation():
             "status": "success"
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e), "success": False}), 400
 
 app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=predict_irrigation, methods=["POST", "OPTIONS"])
 
 
 # ---------------------------------------------------------------------
-# DISEASE PREDICTION ENDPOINT (FULL FRONTEND INTEGRATION)
+# DISEASE PREDICTION ENDPOINT (BULLETPROOF IN-MEMORY IMAGE PROCESSING)
 # ---------------------------------------------------------------------
 @app.route("/predict-disease", methods=["POST", "OPTIONS"])
 def predict_disease():
-    global disease_model
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
     try:
-        file = request.files.get("file") or request.files.get("image")
-        if not file or file.filename == "":
-            return jsonify({"error": "No image file uploaded in request", "success": False}), 400
+        img_bytes = None
 
-        # Save uploaded image
-        temp_path = os.path.join(BASE_DIR, "temp_disease_image.jpg")
-        file.save(temp_path)
+        # 1. Check Multipart file upload
+        if request.files:
+            for key in ["image", "file", "photo", "upload", "leaf"]:
+                if key in request.files and request.files[key].filename:
+                    img_bytes = request.files[key].read()
+                    break
+            if not img_bytes:
+                # Take first available uploaded file
+                first_file = next(iter(request.files.values()), None)
+                if first_file and first_file.filename:
+                    img_bytes = first_file.read()
 
-        # Load and preprocess image (224x224x3)
-        if cv2 is not None:
-            img = cv2.imread(temp_path)
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_resized = cv2.resize(img_rgb, (224, 224)).astype(np.float32)
-            img_batch = np.expand_dims(img_resized, axis=0)
-        else:
-            from PIL import Image
-            img = Image.open(temp_path).convert('RGB').resize((224, 224))
-            img_batch = np.expand_dims(np.array(img, dtype=np.float32), axis=0)
+        # 2. Check JSON Base64 payload
+        if not img_bytes:
+            json_data = request.get_json(force=True, silent=True) or {}
+            img_b64 = json_data.get("image") or json_data.get("file") or json_data.get("data")
+            if img_b64 and isinstance(img_b64, str):
+                if "," in img_b64:
+                    img_b64 = img_b64.split(",", 1)[1]
+                import base64
+                img_bytes = base64.b64decode(img_b64)
 
-        # Genuine ML Model Inference (TFLite or Keras)
+        if not img_bytes:
+            return jsonify({
+                "error": "No image provided. Please upload an image file or provide a base64 image.",
+                "success": False
+            }), 400
+
+        # In-memory Image Preprocessing (Thread-safe, Zero Disk Overhead)
+        import io
+        from PIL import Image
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((224, 224))
+        img_array = np.array(pil_img, dtype=np.float32)
+        img_batch = np.expand_dims(img_array, axis=0)
+
+        # Genuine ML Model Inference
         if tflite_interpreter is not None:
             tflite_interpreter.set_tensor(tflite_input_details[0]['index'], img_batch)
             tflite_interpreter.invoke()
@@ -262,7 +339,7 @@ def predict_disease():
             preds = disease_model(img_batch, training=False).numpy()[0]
         else:
             return jsonify({
-                "error": "Plant Disease ML model is not loaded. Please wait for model initialization.",
+                "error": "Plant Disease ML model is not initialized yet.",
                 "success": False
             }), 500
 
@@ -283,19 +360,11 @@ def predict_disease():
                 "confidence": round(float(preds[idx]) * 100, 2)
             })
 
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
-
-        # Free memory immediately
-        try:
-            del img_batch
-            del preds
-            gc.collect()
-        except Exception:
-            pass
+        # Memory Cleanup
+        del img_batch
+        del img_array
+        del pil_img
+        gc.collect()
 
         info_record = disease_info_db.get(label, {})
 
