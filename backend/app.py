@@ -286,6 +286,49 @@ app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=pr
 
 
 # ---------------------------------------------------------------------
+# PLANT LEAF BOTANICAL & OOD IMAGE VALIDATOR
+# ---------------------------------------------------------------------
+def validate_plant_image(pil_img):
+    try:
+        rgb = np.array(pil_img.convert('RGB'), dtype=np.float32)
+        r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+        total_pixels = rgb.shape[0] * rgb.shape[1]
+
+        # 1. Excess Green Index (ExG): 2*G - R - B
+        exg = 2 * g - r - b
+        green_pixels = np.sum((exg > 15) & (g > 30))
+
+        # 2. PIL HSV Color Space Analysis
+        hsv = np.array(pil_img.convert('HSV'))
+        h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+        # Botanical foliage hues: Green (28-115), Diseased Brown/Yellow (18-28 with S > 60)
+        foliage_mask = (
+            ((h >= 28) & (h <= 115) & (s >= 30) & (v >= 30)) |
+            ((h >= 18) & (h < 28) & (s >= 65) & (v >= 30) & (g >= b))
+        )
+        foliage_pixels = np.sum(foliage_mask)
+
+        # 3. Human Skin Tone Detection (R > G > B, (R - G) > 15, H in [0, 18], S in [30, 185], V > 60)
+        skin_mask = (r > g) & (g > b) & ((r - g) > 15) & (h >= 0) & (h <= 18) & (s >= 30) & (s <= 185) & (v >= 60)
+        skin_pixels = np.sum(skin_mask)
+
+        foliage_ratio = foliage_pixels / total_pixels
+        green_ratio = green_pixels / total_pixels
+        skin_ratio = skin_pixels / total_pixels
+
+        if skin_ratio > 0.30 and foliage_ratio < 0.15:
+            return False, "Human skin/face detected. Please upload a clear image of a plant leaf or crop."
+
+        if foliage_ratio < 0.08 and green_ratio < 0.05:
+            return False, "No plant leaf or crop detected in the image. Please upload a clear photo of a plant leaf."
+
+        return True, "Valid plant image"
+    except Exception:
+        return True, "Valid"
+
+
+# ---------------------------------------------------------------------
 # DISEASE PREDICTION ENDPOINT (BULLETPROOF IN-MEMORY IMAGE PROCESSING)
 # ---------------------------------------------------------------------
 @app.route("/predict-disease", methods=["POST", "OPTIONS"])
@@ -326,8 +369,19 @@ def predict_disease():
         # In-memory Image Preprocessing (Thread-safe, Zero Disk Overhead)
         import io
         from PIL import Image
-        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((224, 224))
-        img_array = np.array(pil_img, dtype=np.float32)
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+        # Botanical / Non-plant validation check
+        is_plant, val_msg = validate_plant_image(pil_img)
+        if not is_plant:
+            return jsonify({
+                "error": val_msg,
+                "is_leaf": False,
+                "success": False
+            }), 400
+
+        pil_resized = pil_img.resize((224, 224))
+        img_array = np.array(pil_resized, dtype=np.float32)
         img_batch = np.expand_dims(img_array, axis=0)
 
         # Genuine ML Model Inference
@@ -345,6 +399,14 @@ def predict_disease():
 
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
+
+        # Confidence threshold check
+        if confidence < 20.0:
+            return jsonify({
+                "error": "Could not recognize a known plant disease on this image (confidence too low). Please provide a clearer, closer leaf image.",
+                "is_leaf": False,
+                "success": False
+            }), 400
 
         if disease_class_names and top_idx < len(disease_class_names):
             label = disease_class_names[top_idx]
