@@ -12,6 +12,7 @@ import 'weather_screen.dart';
 import 'history_screen.dart';
 import 'profile_screen.dart';
 import 'alerts_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -131,43 +132,52 @@ class _HomeScreenState extends State<HomeScreen> {
   String _getPageTitle(SettingsProvider settings) {
     switch (_currentIndex) {
       case 1:
-        return settings.getText('crops');
+        return 'Crop Recommendation';
       case 2:
-        return settings.getText('disease');
+        return 'Disease Detection';
       case 3:
-        return settings.getText('irrigation');
+        return 'Smart Irrigation & Soil';
       case 4:
-        return settings.getText('weather');
+        return 'Weather Forecast';
       case 5:
-        return settings.getText('history');
+        return 'History Log';
       case 6:
-        return settings.getText('profile');
+        return 'Profile & Settings';
       default:
-        return settings.getText('app_title');
+        return 'Dashboard Overview';
     }
   }
 
-  Widget _buildSidebarItem(int index, IconData icon, String label) {
+  Widget _buildWebSidebarItem(int index, IconData icon, String label) {
     final isSelected = _currentIndex == index;
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.green.shade800 : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0x3310B981) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: isSelected
+            ? const Border(left: BorderSide(color: Color(0xFF10B981), width: 4))
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
         child: ListTile(
-          leading: Icon(icon, color: isSelected ? Colors.white : Colors.green.shade100, size: 22),
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: Icon(
+            icon,
+            color: isSelected ? const Color(0xFF10B981) : const TextStyle(color: Color(0xFF94A3B8)).color,
+            size: 20,
+          ),
           title: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.white : Colors.green.shade100,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
               fontSize: 14,
             ),
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           onTap: () => setState(() => _currentIndex = index),
         ),
       ),
@@ -207,9 +217,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       key: _scaffoldKey,
+      backgroundColor: isWide ? const Color(0xFFF8FAFC) : null,
       extendBody: true,
       appBar: isWide
-          ? null // Modern Web Layout: No full-width top bar above sidebar
+          ? null // Web Layout has modern clean top header inside body
           : AppBar(
               leading: IconButton(
                 icon: const Icon(Icons.menu),
@@ -382,92 +393,138 @@ class _HomeScreenState extends State<HomeScreen> {
         value: this,
         child: Row(
           children: [
-            // Modern Web Sidebar (Starts at the top-left corner)
+            // High-End Web Navy Sidebar (#0F172A)
             if (isWide)
               Container(
                 width: 260,
-                color: Colors.green.shade900,
+                color: const Color(0xFF0F172A),
                 child: Column(
                   children: [
                     const SizedBox(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: const BoxDecoration(color: Colors.white24, shape: BoxShape.circle),
-                          child: const Icon(Icons.eco, color: Colors.white, size: 28),
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              settings.getText('app_title'),
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            const Text(
-                              'Smart Agriculture',
-                              style: TextStyle(color: Colors.white70, fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ],
+                            child: const Icon(Icons.eco, color: Colors.white, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'AgroSmart',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                              ),
+                              Text(
+                                'AI Farming Platform',
+                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 32),
                     Expanded(
                       child: ListView(
                         children: [
-                          _buildSidebarItem(0, Icons.dashboard_rounded, settings.getText('dashboard')),
-                          _buildSidebarItem(1, Icons.grass_rounded, settings.getText('crops')),
-                          _buildSidebarItem(2, Icons.bug_report_rounded, settings.getText('disease')),
-                          _buildSidebarItem(3, Icons.water_drop_rounded, settings.getText('irrigation')),
-                          _buildSidebarItem(4, Icons.wb_sunny_rounded, settings.getText('weather')),
-                          _buildSidebarItem(5, Icons.history_rounded, settings.getText('history')),
-                          _buildSidebarItem(6, Icons.person_rounded, settings.getText('profile')),
+                          _buildWebSidebarItem(0, Icons.dashboard_rounded, 'Home'),
+                          _buildWebSidebarItem(1, Icons.grass_rounded, 'Crop Recommendation'),
+                          _buildWebSidebarItem(2, Icons.bug_report_rounded, 'Disease Detection'),
+                          _buildWebSidebarItem(3, Icons.water_drop_rounded, 'Smart Irrigation'),
+                          _buildWebSidebarItem(4, Icons.wb_sunny_rounded, 'Weather'),
+                          _buildWebSidebarItem(5, Icons.history_rounded, 'History Log'),
+                          _buildWebSidebarItem(6, Icons.person_rounded, 'Profile'),
                         ],
+                      ),
+                    ),
+                    // Logout Item at bottom
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: ListTile(
+                          leading: const Icon(Icons.logout, color: Color(0xFFEF4444), size: 20),
+                          title: const Text('Logout', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          onTap: () {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(builder: (context) => const LoginScreen()),
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
 
-            // Right Workspace Body with Modern White Header on Web
+            // Right Workspace Body with Modern Clean White Header on Web
             Expanded(
               child: Column(
                 children: [
-                  // Modern Web Top Bar (Only over workspace body)
+                  // Modern Clean Web Top Header
                   if (isWide)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                      decoration: BoxDecoration(
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      decoration: const BoxDecoration(
                         color: Colors.white,
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2)),
-                        ],
+                        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            _getPageTitle(settings),
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _getPageTitle(settings),
+                                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text('Welcome back, Guest Farmer', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                            ],
                           ),
                           Row(
                             children: [
+                              // Search Input Bar
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                width: 220,
+                                height: 40,
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
+                                  color: const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.search, color: Color(0xFF94A3B8), size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Search...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              // Language Selector
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: DropdownButtonHideUnderline(
                                   child: DropdownButton<String>(
                                     value: settings.languageCode,
                                     dropdownColor: Colors.white,
-                                    icon: const Icon(Icons.language, color: Colors.black87, size: 18),
-                                    style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13),
+                                    icon: const Icon(Icons.language, color: Color(0xFF0F172A), size: 18),
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 13),
                                     items: const [
                                       DropdownMenuItem(value: 'en', child: Text('English 🇬🇧')),
                                       DropdownMenuItem(value: 'kn', child: Text('ಕನ್ನಡ 🇮🇳')),
@@ -481,20 +538,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               const SizedBox(width: 16),
                               IconButton(
-                                icon: const Icon(Icons.notifications_active_outlined, color: Colors.black87),
+                                icon: const Icon(Icons.notifications_active_outlined, color: Color(0xFF0F172A)),
                                 tooltip: settings.getText('alerts'),
                                 onPressed: () {
                                   Navigator.push(context, MaterialPageRoute(builder: (context) => const AlertsScreen()));
                                 },
                               ),
-                              const SizedBox(width: 8),
-                              InkWell(
-                                onTap: () => setState(() => _currentIndex = 6),
-                                borderRadius: BorderRadius.circular(20),
-                                child: CircleAvatar(
-                                  backgroundColor: Colors.green.shade100,
-                                  child: Icon(Icons.person, color: Colors.green.shade800),
-                                ),
+                              const SizedBox(width: 12),
+                              // Guest Avatar Circle ('G')
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: const Color(0xFF10B981),
+                                child: const Text('G', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                               ),
                             ],
                           ),
@@ -542,9 +597,9 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(16.0),
               child: FloatingActionButton.extended(
                 onPressed: () => _triggerVoiceAssistant(settings),
-                backgroundColor: _isListening ? Colors.red.shade700 : Colors.green.shade800,
+                backgroundColor: _isListening ? Colors.red.shade700 : const Color(0xFF10B981),
                 foregroundColor: Colors.white,
-                elevation: 5,
+                elevation: 4,
                 icon: Icon(_isListening ? Icons.mic : Icons.mic_none),
                 label: Text(_isListening ? _spokenText : settings.getText('voice_assistant')),
               ),
@@ -624,14 +679,14 @@ class DashboardTab extends StatelessWidget {
             padding: const EdgeInsets.all(28),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.green.shade800, Colors.teal.shade800, Colors.green.shade900],
+                colors: [const Color(0xFF047857), const Color(0xFF0F766E), const Color(0xFF065F46)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.green.withValues(alpha: 0.3),
+                  color: const Color(0xFF047857).withValues(alpha: 0.25),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -661,7 +716,7 @@ class DashboardTab extends StatelessWidget {
                             onPressed: () => parentState?._navigateToTab(1),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
-                              foregroundColor: Colors.green.shade900,
+                              foregroundColor: const Color(0xFF065F46),
                               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
@@ -696,7 +751,7 @@ class DashboardTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
-          const Text('Platform Modules', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const Text('Platform Modules', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
           const SizedBox(height: 16),
           GridView.count(
             crossAxisCount: isWide ? 3 : 1,
@@ -710,42 +765,42 @@ class DashboardTab extends StatelessWidget {
                 title: settings.getText('crops'),
                 subtitle: 'Soil NPK & climate-based crop recommendation',
                 icon: Icons.grass,
-                color: Colors.green.shade700,
+                color: const Color(0xFF10B981),
                 onTap: () => parentState?._navigateToTab(1),
               ),
               FeatureCard(
                 title: settings.getText('disease'),
                 subtitle: 'AI leaf image scan & disease diagnosis',
                 icon: Icons.bug_report,
-                color: Colors.blue.shade700,
+                color: const Color(0xFF0284C7),
                 onTap: () => parentState?._navigateToTab(2),
               ),
               FeatureCard(
                 title: settings.getText('irrigation'),
                 subtitle: 'IoT soil moisture telemetry & pump control',
                 icon: Icons.water_drop,
-                color: Colors.teal.shade700,
+                color: const Color(0xFF0D9488),
                 onTap: () => parentState?._navigateToTab(3),
               ),
               FeatureCard(
                 title: settings.getText('weather'),
                 subtitle: 'Climate forecast & weather telemetry',
                 icon: Icons.wb_sunny,
-                color: Colors.purple.shade700,
+                color: const Color(0xFF7C3AED),
                 onTap: () => parentState?._navigateToTab(4),
               ),
               FeatureCard(
                 title: settings.getText('history'),
                 subtitle: 'View saved crop advice & disease records',
                 icon: Icons.history,
-                color: Colors.orange.shade800,
+                color: const Color(0xFFD97706),
                 onTap: () => parentState?._navigateToTab(5),
               ),
               FeatureCard(
                 title: settings.getText('profile'),
                 subtitle: 'Language, voice assistant & settings',
                 icon: Icons.person,
-                color: Colors.pink.shade700,
+                color: const Color(0xFFDB2777),
                 onTap: () => parentState?._navigateToTab(6),
               ),
             ],
@@ -776,8 +831,11 @@ class FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
@@ -795,13 +853,13 @@ class FeatureCard extends StatelessWidget {
                     decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(14)),
                     child: Icon(icon, color: color, size: 28),
                   ),
-                  Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey.shade400),
+                  Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey.shade400),
                 ],
               ),
               const SizedBox(height: 16),
-              Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
               const SizedBox(height: 6),
-              Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.3)),
+              Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.3)),
             ],
           ),
         ),
