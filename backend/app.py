@@ -492,8 +492,8 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check for non-leaf/uncertain images (requires at least 70% confidence)
-        if confidence < 70.0:
+        # Confidence threshold check for extreme noise/outliers (random baseline on 90 classes is 1.1%)
+        if confidence < 10.0:
             return jsonify({
                 "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
                 "is_leaf": False,
