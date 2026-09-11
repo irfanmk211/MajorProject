@@ -249,15 +249,59 @@ app.add_url_rule("/api/predict-crop", endpoint="api_predict_crop", view_func=pre
 # ---------------------------------------------------------------------
 # IRRIGATION & WEATHER ENDPOINTS (FOR SOIL IRRIGATION PAGE)
 # ---------------------------------------------------------------------
+OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "")
+
 @app.route("/weather", methods=["GET", "OPTIONS"])
 def weather():
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
-    return jsonify({
-        "temperature": sensor_data.get("temperature", 28) or 28,
-        "humidity": sensor_data.get("humidity", 75) or 75,
-        "city": "Udupi"
-    })
+    try:
+        city = request.args.get("city", "Udupi")
+        lat = request.args.get("lat")
+        lon = request.args.get("lon")
+
+        weather_info = {
+            "temperature": float(sensor_data.get("temperature", 28) or 28),
+            "humidity": float(sensor_data.get("humidity", 75) or 75),
+            "city": city,
+            "description": "Clear Sky",
+            "wind_speed": 12.0,
+            "source": "sensor_default"
+        }
+
+        # Query OpenWeatherMap API
+        try:
+            import urllib.request
+            if lat and lon:
+                owm_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric"
+            else:
+                owm_url = f"https://api.openweathermap.org/data/2.5/weather?q={urllib.parse.quote(city)}&appid={OPENWEATHER_API_KEY}&units=metric"
+
+            req = urllib.request.Request(owm_url, headers={"User-Agent": "AgroSmart-App/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as res:
+                if res.status == 200:
+                    data = json.loads(res.read().decode())
+                    weather_info.update({
+                        "temperature": round(float(data["main"]["temp"]), 1),
+                        "feels_like": round(float(data["main"].get("feels_like", data["main"]["temp"])), 1),
+                        "humidity": float(data["main"]["humidity"]),
+                        "pressure": float(data["main"].get("pressure", 1013)),
+                        "wind_speed": round(float(data.get("wind", {}).get("speed", 0) * 3.6), 1), # km/h
+                        "description": data["weather"][0]["description"].capitalize() if data.get("weather") else "Clear",
+                        "icon": data["weather"][0]["icon"] if data.get("weather") else "01d",
+                        "city": data.get("name", city),
+                        "country": data.get("sys", {}).get("country", "IN"),
+                        "sunrise": data.get("sys", {}).get("sunrise"),
+                        "sunset": data.get("sys", {}).get("sunset"),
+                        "source": "openweathermap"
+                    })
+        except Exception as owm_err:
+            # If OpenWeather key is still propagating or throttled, return safe fallback
+            weather_info["owm_notice"] = str(owm_err)
+
+        return jsonify(weather_info)
+    except Exception as e:
+        return jsonify({"error": str(e), "temperature": 28, "humidity": 75, "city": "Udupi"}), 200
 
 app.add_url_rule("/api/weather", endpoint="api_weather", view_func=weather, methods=["GET", "OPTIONS"])
 
@@ -317,11 +361,11 @@ def validate_plant_image(pil_img):
         green_ratio = green_pixels / total_pixels
         skin_ratio = skin_pixels / total_pixels
 
-        if skin_ratio > 0.25 and foliage_ratio < 0.20:
-            return False, "Non-leaf image detected (Human skin/face). Please upload a clear photo of a plant leaf."
+        if skin_ratio > 0.15:
+            return False, "Non-leaf image detected (Human skin or face detected). Please upload a clear photo of a plant leaf."
 
-        if foliage_ratio < 0.12 and green_ratio < 0.08:
-            return False, "The uploaded image does not appear to be a plant leaf. Please upload a clear photo of a plant leaf or crop."
+        if foliage_ratio < 0.20 and green_ratio < 0.15:
+            return False, "The uploaded image does not appear to be a plant leaf (insufficient leaf foliage). Please upload a clear, close-up photo of a plant leaf or crop."
 
         return True, "Valid plant image"
     except Exception:
@@ -439,8 +483,8 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check for extreme noise/outliers
-        if confidence < 15.0:
+        # Confidence threshold check for non-leaf/uncertain images (requires at least 70% confidence)
+        if confidence < 70.0:
             return jsonify({
                 "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
                 "is_leaf": False,
