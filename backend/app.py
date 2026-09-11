@@ -410,7 +410,36 @@ app.add_url_rule("/api/get_sensor", endpoint="api_get_sensor", view_func=get_sen
 
 
 # =====================================================================
+# 4. AUTOMATIC KEEP-ALIVE PINGER (PREVENTS RENDER FROM SLEEPING)
+# =====================================================================
+def start_keep_alive():
+    import threading
+    import time
+    import urllib.request
+
+    def pinger():
+        time.sleep(30)
+        target_url = os.environ.get("RENDER_EXTERNAL_URL", "https://agrosmart-of05.onrender.com/health")
+        if not target_url.endswith("/health"):
+            target_url = target_url.rstrip("/") + "/health"
+        while True:
+            try:
+                time.sleep(600)  # Ping every 10 minutes (Render inactivity timer is 15 min)
+                req = urllib.request.Request(target_url, headers={"User-Agent": "AgroSmart-KeepAlive/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as res:
+                    print(f"[KEEP-ALIVE] Pinged {target_url} - Status {res.status}")
+            except Exception as e:
+                print(f"[KEEP-ALIVE] Ping notice: {e}")
+
+    thread = threading.Thread(target=pinger, daemon=True)
+    thread.start()
+
+start_keep_alive()
+
+
+# =====================================================================
 # SERVER INITIALIZATION
 # =====================================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
