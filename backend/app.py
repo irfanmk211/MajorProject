@@ -350,40 +350,54 @@ def validate_plant_image(pil_img):
         r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
         total_pixels = rgb.shape[0] * rgb.shape[1]
 
-        # 1. Excess Green Index (ExG): 2*G - R - B
-        exg = 2 * g - r - b
-        green_pixels = np.sum((exg > 15) & (g > 30))
-
-        # 2. PIL HSV Color Space Analysis
         hsv = np.array(pil_img.convert('HSV'))
         h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
-        # Botanical foliage hues: 
-        # - Healthy Green (H: 28-115, S >= 25, V >= 25)
-        # - Chlorosis / Yellowing (H: 18-28, S >= 50, V >= 30, G >= B)
-        # - Brown / Dried / Necrotic Blight (H: 10-22, S >= 35, V: 20-180, R >= G >= B)
-        foliage_mask = (
-            ((h >= 28) & (h <= 115) & (s >= 25) & (v >= 25)) |
-            ((h >= 18) & (h < 28) & (s >= 50) & (v >= 30) & (g >= b)) |
-            ((h >= 10) & (h < 22) & (s >= 35) & (v >= 20) & (v <= 180) & (r >= g) & (g >= b))
+        # 1. Genuine Green Foliage: G is dominant over R and B
+        green_mask = (g > r) & (g > b) & ((2 * g - r - b) > 12) & (g > 35)
+
+        # 2. Chlorosis / Yellow Foliage: R and G are both high, G >= 0.80*R, B is low (absorbed by chlorophyll)
+        yellow_leaf_mask = (
+            (g >= 0.80 * r) & (g > 1.25 * b) & (g > 50) &
+            (h >= 20) & (h <= 45) & (s >= 40)
         )
-        foliage_pixels = np.sum(foliage_mask)
 
-        # 3. Human Skin Tone Detection (R > G > B, (R - G) > 15, H in [0, 18], S in [30, 185], V > 60)
-        skin_mask = (r > g) & (g > b) & ((r - g) > 15) & (h >= 0) & (h <= 18) & (s >= 30) & (s <= 185) & (v >= 60)
-        skin_pixels = np.sum(skin_mask)
+        # 3. Brown / Necrotic Blighted Leaf: R >= G, G > 1.15*B, R - G is modest (< 35)
+        brown_leaf_mask = (
+            (r >= g) & (g > 1.15 * b) & ((r - g) < 35) &
+            (h >= 10) & (h <= 24) & (s >= 35) & (v >= 25) & (v <= 170)
+        )
 
-        foliage_ratio = foliage_pixels / total_pixels
-        green_ratio = green_pixels / total_pixels
-        skin_ratio = skin_pixels / total_pixels
+        plant_mask = green_mask | yellow_leaf_mask | brown_leaf_mask
+        plant_ratio = np.sum(plant_mask) / total_pixels
 
-        # Reject pure human face/skin selfies (unless leaf is clearly in hand)
-        if skin_ratio > 0.45 and foliage_ratio < 0.10:
-            return False, "Human skin/face detected. Please upload a clear photo of a plant leaf or crop."
+        # 4. Sky / Sea / Water Detection: Blue is dominant (B > G or B > R)
+        sky_sea_mask = ((b > g) | (b > r)) & (b > 60)
+        sky_sea_ratio = np.sum(sky_sea_mask) / total_pixels
 
-        # Require at least 8% foliage/green vegetation
-        if foliage_ratio < 0.08 and green_ratio < 0.05:
-            return False, "No plant leaf detected in the image. Please upload a clear photo of a plant leaf or crop."
+        # 5. Human Skin Detection (R > G > B, R - G > 20, H in 0-20, S in 30-180, V > 50)
+        skin_mask = (r > g) & (g > b) & ((r - g) > 20) & (h >= 0) & (h <= 20) & (s >= 30) & (s <= 180) & (v >= 50)
+        skin_ratio = np.sum(skin_mask) / total_pixels
+
+        # 6. Sand / Earth / Warm Sunset background (R >> G, R - G > 40)
+        sand_sunset_mask = (r > g) & ((r - g) > 40) & (v > 70)
+        sand_sunset_ratio = np.sum(sand_sunset_mask) / total_pixels
+
+        # Rejection: Landscape / Sea / Sky / Beach dominance
+        if sky_sea_ratio > 0.25 and plant_ratio < 0.35:
+            return False, "No plant leaf detected (outdoor landscape/sky/water detected). Please upload a close-up photo of a plant leaf."
+
+        # Rejection: Sand / Beach / Sunset dominance
+        if sand_sunset_ratio > 0.30 and plant_ratio < 0.25:
+            return False, "No plant leaf detected (beach/sunset/landscape detected). Please upload a close-up photo of a plant leaf."
+
+        # Rejection: Human selfie / face / body
+        if skin_ratio > 0.25 and plant_ratio < 0.15:
+            return False, "Human face/skin detected. Please upload a clear photo of a plant leaf or crop."
+
+        # Rejection: Minimum plant leaf requirement
+        if plant_ratio < 0.15:
+            return False, "No plant leaf detected in the image. Please upload a clear, focused photo of a crop leaf."
 
         return True, "Valid plant image"
     except Exception:
@@ -503,8 +517,8 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check for extreme noise/outliers (random baseline on 81 classes is 1.2%)
-        if confidence < 10.0:
+        # Confidence threshold check for extreme noise/outliers (requires at least 50% confidence for diagnosis)
+        if confidence < 50.0:
             return jsonify({
                 "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
                 "is_leaf": False,
