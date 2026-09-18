@@ -124,16 +124,19 @@ if os.path.exists(CLASS_NAMES_PATH):
         disease_class_names = [line.strip() for line in f if line.strip()]
     print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names.")
 
-# Initialize TFLite model via ultra-lightweight tflite_runtime or tf.lite (<15MB RAM)
+# Initialize TFLite model via ultra-lightweight ai_edge_litert, tflite_runtime or tf.lite (<15MB RAM)
 if os.path.exists(DISEASE_TFLITE_PATH):
     try:
-        import tflite_runtime.interpreter as tflite
+        try:
+            import ai_edge_litert.interpreter as tflite
+        except ImportError:
+            import tflite_runtime.interpreter as tflite
         tflite_interpreter = tflite.Interpreter(model_path=DISEASE_TFLITE_PATH)
         tflite_interpreter.allocate_tensors()
         tflite_input_details = tflite_interpreter.get_input_details()
         tflite_output_details = tflite_interpreter.get_output_details()
-        print(f"[DISEASE MODEL] Loaded optimized TFLite model via tflite_runtime from: {DISEASE_TFLITE_PATH}")
-    except Exception:
+        print(f"[DISEASE MODEL] Loaded optimized TFLite model via litert/tflite_runtime from: {DISEASE_TFLITE_PATH}")
+    except Exception as e_litert:
         try:
             import tensorflow as tf
             tflite_interpreter = tf.lite.Interpreter(model_path=DISEASE_TFLITE_PATH)
@@ -141,8 +144,8 @@ if os.path.exists(DISEASE_TFLITE_PATH):
             tflite_input_details = tflite_interpreter.get_input_details()
             tflite_output_details = tflite_interpreter.get_output_details()
             print(f"[DISEASE MODEL] Loaded optimized TFLite model via tf.lite from: {DISEASE_TFLITE_PATH}")
-        except Exception as e:
-            print(f"[DISEASE MODEL] Could not initialize TFLite model: {e}")
+        except Exception as e_tf:
+            print(f"[DISEASE MODEL] Could not initialize TFLite model: {e_litert} / {e_tf}")
 
 # Fallback to Keras model only if TFLite not available
 if tflite_interpreter is None and os.path.exists(DISEASE_MODEL_PATH):
