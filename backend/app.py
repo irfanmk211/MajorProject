@@ -9,22 +9,7 @@ import gc
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# Optional imports for Disease Recognition Model
-try:
-    import cv2
-except ImportError:
-    cv2 = None
-
-try:
-    import tensorflow as tf
-    try:
-        tf.config.set_visible_devices([], 'GPU')
-    except Exception:
-        pass
-    from tensorflow.keras.models import load_model
-except ImportError:
-    tf = None
-    load_model = None
+# Optional imports for Disease Recognition Model handled lazily below
 
 # Initialize Flask App
 app = Flask(__name__)
@@ -139,21 +124,31 @@ if os.path.exists(CLASS_NAMES_PATH):
         disease_class_names = [line.strip() for line in f if line.strip()]
     print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names.")
 
-# Try initializing optimized TFLite interpreter first (takes <20MB RAM)
-if tf and os.path.exists(DISEASE_TFLITE_PATH):
+# Initialize TFLite model via ultra-lightweight tflite_runtime or tf.lite (<15MB RAM)
+if os.path.exists(DISEASE_TFLITE_PATH):
     try:
-        tflite_interpreter = tf.lite.Interpreter(model_path=DISEASE_TFLITE_PATH)
+        import tflite_runtime.interpreter as tflite
+        tflite_interpreter = tflite.Interpreter(model_path=DISEASE_TFLITE_PATH)
         tflite_interpreter.allocate_tensors()
         tflite_input_details = tflite_interpreter.get_input_details()
         tflite_output_details = tflite_interpreter.get_output_details()
-        print(f"[DISEASE MODEL] Loaded optimized TFLite model from: {DISEASE_TFLITE_PATH}")
-    except Exception as e:
-        print(f"[DISEASE MODEL] Could not initialize TFLite model: {e}")
+        print(f"[DISEASE MODEL] Loaded optimized TFLite model via tflite_runtime from: {DISEASE_TFLITE_PATH}")
+    except Exception:
+        try:
+            import tensorflow as tf
+            tflite_interpreter = tf.lite.Interpreter(model_path=DISEASE_TFLITE_PATH)
+            tflite_interpreter.allocate_tensors()
+            tflite_input_details = tflite_interpreter.get_input_details()
+            tflite_output_details = tflite_interpreter.get_output_details()
+            print(f"[DISEASE MODEL] Loaded optimized TFLite model via tf.lite from: {DISEASE_TFLITE_PATH}")
+        except Exception as e:
+            print(f"[DISEASE MODEL] Could not initialize TFLite model: {e}")
 
-# Fallback to Keras model if TFLite not available
-if tflite_interpreter is None and load_model and os.path.exists(DISEASE_MODEL_PATH):
+# Fallback to Keras model only if TFLite not available
+if tflite_interpreter is None and os.path.exists(DISEASE_MODEL_PATH):
     try:
-        disease_model = load_model(DISEASE_MODEL_PATH)
+        import tensorflow as tf
+        disease_model = tf.keras.models.load_model(DISEASE_MODEL_PATH)
         print(f"[DISEASE MODEL] Loaded Keras model from: {DISEASE_MODEL_PATH}")
     except Exception as e:
         print(f"[DISEASE MODEL] Could not initialize Keras model: {e}")
