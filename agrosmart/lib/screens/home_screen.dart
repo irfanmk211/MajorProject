@@ -12,6 +12,8 @@ import 'weather_screen.dart';
 import 'history_screen.dart';
 import 'profile_screen.dart';
 import 'alerts_screen.dart';
+import 'about_screen.dart';
+import 'contact_screen.dart';
 import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -22,7 +24,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   int _currentIndex = 0;
   bool _isListening = false;
   String _spokenText = '';
@@ -35,6 +36,8 @@ class _HomeScreenState extends State<HomeScreen> {
     const WeatherScreen(),
     const HistoryScreen(),
     const ProfileScreen(),
+    const AboutScreen(),
+    const ContactScreen(),
   ];
 
   void _navigateToTab(int index) {
@@ -132,19 +135,23 @@ class _HomeScreenState extends State<HomeScreen> {
   String _getPageTitle(SettingsProvider settings) {
     switch (_currentIndex) {
       case 1:
-        return 'Crop Recommendation';
+        return settings.getText('crops');
       case 2:
-        return 'Disease Detection';
+        return settings.getText('disease');
       case 3:
-        return 'Smart Irrigation & Soil';
+        return settings.getText('irrigation');
       case 4:
-        return 'Weather Forecast';
+        return settings.getText('weather');
       case 5:
-        return 'History Log';
+        return settings.getText('history');
       case 6:
-        return 'Profile & Settings';
+        return settings.getText('profile');
+      case 7:
+        return settings.getText('about');
+      case 8:
+        return settings.getText('contact');
       default:
-        return 'Dashboard Overview';
+        return settings.getText('dashboard');
     }
   }
 
@@ -166,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
           leading: Icon(
             icon,
-            color: isSelected ? const Color(0xFF10B981) : const TextStyle(color: Color(0xFF94A3B8)).color,
+            color: isSelected ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
             size: 20,
           ),
           title: Text(
@@ -186,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildNavTab(int index, IconData icon, String label) {
     final isSelected = _currentIndex == index;
-    final color = isSelected ? Colors.green.shade800 : Colors.grey.shade600;
+    final color = isSelected ? const Color(0xFF10B981) : const Color(0xFF64748B);
 
     return InkWell(
       onTap: () => setState(() => _currentIndex = index),
@@ -216,49 +223,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final isWide = MediaQuery.of(context).size.width >= 900;
 
     return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: isWide ? const Color(0xFFF8FAFC) : null,
+      backgroundColor: const Color(0xFFF8FAFC),
       extendBody: true,
       appBar: isWide
-          ? null // Web Layout has modern clean top header inside body
+          ? null
           : AppBar(
-              leading: IconButton(
-                icon: const Icon(Icons.menu),
-                tooltip: 'Workspace Menu',
-                onPressed: () {
-                  _scaffoldKey.currentState?.openDrawer();
-                },
-              ),
-              title: Text(_getPageTitle(settings), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-              backgroundColor: Colors.green.shade800,
+              title: Text(_getPageTitle(settings), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 19)),
+              backgroundColor: const Color(0xFF10B981),
               foregroundColor: Colors.white,
               elevation: 0,
               actions: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: settings.languageCode,
-                      dropdownColor: Colors.green.shade800,
-                      icon: const Icon(Icons.language, color: Colors.white, size: 20),
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                      items: const [
-                        DropdownMenuItem(value: 'en', child: Text('English')),
-                        DropdownMenuItem(value: 'kn', child: Text('ಕನ್ನಡ')),
-                        DropdownMenuItem(value: 'hi', child: Text('हिंदी')),
-                      ],
-                      onChanged: (code) {
-                        if (code != null) settings.setLanguage(code);
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.history_rounded),
                   tooltip: settings.getText('history'),
@@ -283,117 +257,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 8),
               ],
             ),
-      drawer: !isWide
-          ? Drawer(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  DrawerHeader(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [Colors.green.shade800, Colors.teal.shade800]),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: const BoxDecoration(color: Colors.white24, shape: BoxShape.circle),
-                              child: const Icon(Icons.eco, color: Colors.white, size: 30),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  settings.getText('app_title'),
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-                                ),
-                                const Text(
-                                  'AgroSmart Workspace',
-                                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.dashboard_rounded),
-                          title: Text(settings.getText('dashboard')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 0);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.grass_rounded),
-                          title: Text(settings.getText('crops')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 1);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.bug_report_rounded),
-                          title: Text(settings.getText('disease')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 2);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.water_drop_rounded),
-                          title: Text(settings.getText('irrigation')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 3);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.wb_sunny_rounded),
-                          title: Text(settings.getText('weather')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 4);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.history_rounded),
-                          title: Text(settings.getText('history')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 5);
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.person_rounded),
-                          title: Text(settings.getText('profile')),
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() => _currentIndex = 6);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : null,
       body: Provider.value(
         value: this,
         child: Row(
           children: [
-            // High-End Web Navy Sidebar (#0F172A)
+            // UNIFIED WEB NAVY SIDEBAR (#0F172A)
             if (isWide)
               Container(
                 width: 260,
@@ -414,14 +282,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: const Icon(Icons.eco, color: Colors.white, size: 24),
                           ),
                           const SizedBox(width: 12),
-                          const Column(
+                          Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'AgroSmart',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                                settings.getText('app_title'),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
                               ),
-                              Text(
+                              const Text(
                                 'AI Farming Platform',
                                 style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                               ),
@@ -434,13 +302,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     Expanded(
                       child: ListView(
                         children: [
-                          _buildWebSidebarItem(0, Icons.dashboard_rounded, 'Home'),
-                          _buildWebSidebarItem(1, Icons.grass_rounded, 'Crop Recommendation'),
-                          _buildWebSidebarItem(2, Icons.bug_report_rounded, 'Disease Detection'),
-                          _buildWebSidebarItem(3, Icons.water_drop_rounded, 'Smart Irrigation'),
-                          _buildWebSidebarItem(4, Icons.wb_sunny_rounded, 'Weather'),
-                          _buildWebSidebarItem(5, Icons.history_rounded, 'History Log'),
-                          _buildWebSidebarItem(6, Icons.person_rounded, 'Profile'),
+                          _buildWebSidebarItem(0, Icons.dashboard_rounded, settings.getText('tab_home')),
+                          _buildWebSidebarItem(1, Icons.grass_rounded, settings.getText('crops')),
+                          _buildWebSidebarItem(2, Icons.bug_report_rounded, settings.getText('disease')),
+                          _buildWebSidebarItem(3, Icons.water_drop_rounded, settings.getText('irrigation')),
+                          _buildWebSidebarItem(4, Icons.wb_sunny_rounded, settings.getText('weather')),
+                          _buildWebSidebarItem(5, Icons.history_rounded, settings.getText('history')),
+                          _buildWebSidebarItem(6, Icons.person_rounded, settings.getText('profile')),
+                          _buildWebSidebarItem(7, Icons.info_rounded, settings.getText('about')),
+                          _buildWebSidebarItem(8, Icons.email_rounded, settings.getText('contact')),
                         ],
                       ),
                     ),
@@ -451,7 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: Colors.transparent,
                         child: ListTile(
                           leading: const Icon(Icons.logout, color: Color(0xFFEF4444), size: 20),
-                          title: const Text('Logout', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14)),
+                          title: Text(settings.getText('logout'), style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14)),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           onTap: () {
                             Navigator.pushReplacement(
@@ -466,11 +336,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // Right Workspace Body with Modern Clean White Header on Web
+            // WORKSPACE BODY WITH CLEAN WHITE TOP HEADER ON WEB
             Expanded(
               child: Column(
                 children: [
-                  // Modern Clean Web Top Header
+                  // Clean Web Top Header
                   if (isWide)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
@@ -489,12 +359,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                               ),
                               const SizedBox(height: 2),
-                              const Text('Welcome back, Guest Farmer', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                              Text(settings.getText('welcome_guest'), style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                             ],
                           ),
                           Row(
                             children: [
-                              // Search Input Bar
+                              // Search Bar
                               Container(
                                 width: 220,
                                 height: 40,
@@ -612,11 +482,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 gradient: LinearGradient(
                   colors: _isListening
                       ? [Colors.red.shade600, Colors.red.shade800]
-                      : [Colors.green.shade700, Colors.teal.shade800],
+                      : [const Color(0xFF10B981), const Color(0xFF047857)],
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: (_isListening ? Colors.red : Colors.green).withValues(alpha: 0.4),
+                    color: (_isListening ? Colors.red : const Color(0xFF10B981)).withValues(alpha: 0.4),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -674,19 +544,19 @@ class DashboardTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Hero Banner
+          // Hero Banner with Unified Emerald Gradient (#059669 -> #10B981 -> #047857)
           Container(
             padding: const EdgeInsets.all(28),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [const Color(0xFF047857), const Color(0xFF0F766E), const Color(0xFF065F46)],
+              gradient: const LinearGradient(
+                colors: [Color(0xFF059669), Color(0xFF10B981), Color(0xFF047857)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF047857).withValues(alpha: 0.25),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.25),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -716,7 +586,7 @@ class DashboardTab extends StatelessWidget {
                             onPressed: () => parentState?._navigateToTab(1),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
-                              foregroundColor: const Color(0xFF065F46),
+                              foregroundColor: const Color(0xFF047857),
                               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
@@ -751,7 +621,7 @@ class DashboardTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
-          const Text('Platform Modules', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+          Text(settings.getText('platform_modules'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
           const SizedBox(height: 16),
           GridView.count(
             crossAxisCount: isWide ? 3 : 1,
@@ -759,7 +629,7 @@ class DashboardTab extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 20,
             mainAxisSpacing: 20,
-            childAspectRatio: isWide ? 1.4 : 1.5,
+            childAspectRatio: isWide ? 1.8 : 2.2,
             children: [
               FeatureCard(
                 title: settings.getText('crops'),
@@ -840,26 +710,37 @@ class FeatureCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: const EdgeInsets.all(22.0),
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(14)),
-                    child: Icon(icon, color: color, size: 28),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+                    child: Icon(icon, color: color, size: 24),
                   ),
                   Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey.shade400),
                 ],
               ),
-              const SizedBox(height: 16),
-              Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-              const SizedBox(height: 6),
-              Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.3)),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.3),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),

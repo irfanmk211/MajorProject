@@ -32,7 +32,7 @@ class ApiService {
     }
   }
 
-  // 2. Plant Disease Prediction (Safe Error Message Extraction)
+  // 2. Plant Disease Prediction (Safe Error Message Extraction for 200 & 400)
   static Future<Map<String, dynamic>> predictDisease({
     File? imageFile,
     Uint8List? imageBytes,
@@ -61,20 +61,31 @@ class ApiService {
       var streamedResponse = await request.send().timeout(const Duration(seconds: 25));
       var response = await http.Response.fromStream(streamedResponse);
 
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        if (decoded['success'] == false) {
-          throw Exception(decoded['error'] ?? 'Disease detection rejected');
-        }
-        return decoded;
-      } else {
+      if (response.body.isNotEmpty) {
         try {
-          final errJson = jsonDecode(response.body);
-          if (errJson is Map && errJson.containsKey('error')) {
-            throw Exception(errJson['error']);
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map) {
+            if (decoded['success'] == false) {
+              throw Exception(decoded['error'] ?? 'Image rejected by leaf validator');
+            }
+            if (response.statusCode == 200 && decoded.containsKey('label')) {
+              return decoded as Map<String, dynamic>;
+            }
+            if (decoded.containsKey('error')) {
+              throw Exception(decoded['error']);
+            }
           }
-        } catch (_) {}
-        throw Exception('Failed to detect disease (Server returned status ${response.statusCode})');
+        } catch (jsonErr) {
+          if (jsonErr is Exception && !jsonErr.toString().contains('FormatException')) {
+            rethrow;
+          }
+        }
+      }
+
+      if (response.statusCode == 502 || response.statusCode == 503) {
+        throw Exception('Server is busy or restarting. Please try analyzing again in a moment.');
+      } else {
+        throw Exception('Failed to detect disease (Status ${response.statusCode})');
       }
     } catch (e) {
       String msg = e.toString().replaceAll('Exception: ', '');

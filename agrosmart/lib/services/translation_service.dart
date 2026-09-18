@@ -9,7 +9,7 @@ class TranslationService {
       'tab_disease': 'Disease',
       'tab_irrigation': 'Irrigation',
       'tab_weather': 'Weather',
-      'dashboard': 'Dashboard',
+      'dashboard': 'Dashboard Overview',
       'crops': 'Crop Advice',
       'disease': 'Disease Detection',
       'irrigation': 'Smart Irrigation',
@@ -17,6 +17,10 @@ class TranslationService {
       'history': 'History Log',
       'alerts': 'Notifications & Alerts',
       'profile': 'Profile & Settings',
+      'about': 'About Project',
+      'contact': 'Contact Support',
+      'welcome_guest': 'Welcome back, Guest Farmer',
+      'platform_modules': 'Platform Modules',
       'language': 'Language / ಭಾಷೆ / भाषा',
       'voice_assistant': 'Voice Assistant',
       'voice_listening': 'Listening...',
@@ -76,14 +80,18 @@ class TranslationService {
       'tab_disease': 'ರೋಗ',
       'tab_irrigation': 'ನೀರಾವರಿ',
       'tab_weather': 'ಹವಾಮಾನ',
-      'dashboard': 'ಡ್ಯಾಶ್‌ಬೋರ್ಡ್',
+      'dashboard': 'ಡ್ಯಾಶ್‌ಬೋರ್ಡ್ ಅವಲೋಕನ',
       'crops': 'ಬೆಳೆ ಸಲಹೆ',
       'disease': 'ರೋಗ ಪತ್ತೆ',
       'irrigation': 'ಸ್ಮಾರ್ಟ್ ನೀರಾವರಿ',
-      'weather': 'ಹವಾಮಾನ',
-      'history': 'ಇತಿಹಾಸ',
+      'weather': 'ಹವಾಮಾನ ಮುನ್ಸೂಚನೆ',
+      'history': 'ಇತಿಹಾಸದ ವಿವರ',
       'alerts': 'ಎಚ್ಚರಿಕೆಗಳು',
-      'profile': 'ಪ್ರೊಫೈಲ್',
+      'profile': 'ಪ್ರೊಫೈಲ್ ಮತ್ತು ಸಂರಚನೆ',
+      'about': 'ಯೋಜನೆಯ ಕುರಿತು',
+      'contact': 'ಸಂಪರ್ಕಿಸಿ ಮತ್ತು ಬೆಂಬಲ',
+      'welcome_guest': 'ಸ್ವಾಗತ, ಅತಿಥಿ ರೈತರು',
+      'platform_modules': 'ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಮಾಡ್ಯೂಲ್‌ಗಳು',
       'language': 'ಭಾಷೆ / Language / भाषा',
       'voice_assistant': 'ಧ್ವನಿ ಸಹಾಯಕ',
       'voice_listening': 'ಆಲಿಸಲಾಗುತ್ತಿದೆ...',
@@ -143,14 +151,18 @@ class TranslationService {
       'tab_disease': 'रोग',
       'tab_irrigation': 'सिंचाई',
       'tab_weather': 'मौसम',
-      'dashboard': 'डैशबोर्ड',
+      'dashboard': 'डैशबोर्ड अवलोकन',
       'crops': 'फसल सलाह',
       'disease': 'रोग पहचान',
       'irrigation': 'स्मार्ट सिंचाई',
-      'weather': 'मौसम',
-      'history': 'इतिहास',
+      'weather': 'मौसम पूर्वानुमान',
+      'history': 'इतिहास लॉग',
       'alerts': 'अलर्ट',
-      'profile': 'प्रोफ़ाइल',
+      'profile': 'प्रोफ़ाइल और सेटिंग्स',
+      'about': 'परियोजना के बारे में',
+      'contact': 'संपर्क करें और सहायता',
+      'welcome_guest': 'स्वागत है, अतिथि किसान',
+      'platform_modules': 'मंच मॉड्यूल',
       'language': 'भाषा / Language / ಭಾಷೆ',
       'voice_assistant': 'वॉयस असिस्टेंट',
       'voice_listening': 'सुन रहे हैं...',
@@ -198,45 +210,51 @@ class TranslationService {
       'esp32_status': 'आईओटी सेंसर स्थिति',
       'connected': 'कनेक्टेड',
       'no_data': 'कोई इतिहास नहीं मिला।',
-      'forecast_5day': '५-दिवसीय मौसम पूर्वानुमान',
+      'forecast_5day': '5-दिवसीय मौसम पूर्वानुमान',
       'rain_probability': 'बारिश की संभावना',
-    },
+    }
   };
 
   static String translate(String key, String langCode) {
-    final map = _translations[langCode] ?? _translations['en']!;
-    return map[key] ?? _translations['en']![key] ?? key;
+    if (_translations.containsKey(langCode) && _translations[langCode]!.containsKey(key)) {
+      return _translations[langCode]![key]!;
+    }
+    return _translations['en']![key] ?? key;
   }
 
-  static String translateCrop(String cropName, String langCode) {
-    final Map<String, Map<String, String>> cropMap = {
-      'rice': {'kn': 'ಅಕ್ಕಿ / ಭತ್ತ (Rice)', 'hi': 'चावल / धान (Rice)'},
-      'maize': {'kn': 'ಮೆಕ್ಕೆಜೋಳ (Maize)', 'hi': 'मक्का (Maize)'},
-      'chickpea': {'kn': 'ಕಡಲೆ (Chickpea)', 'hi': 'चना (Chickpea)'},
-      'kidneybeans': {'kn': 'ರಾಜ್ಮಾ (Kidney Beans)', 'hi': 'राजमा (Kidney Beans)'},
-      'pigeonpeas': {'kn': 'ತೊಗರಿ (Pigeon Peas)', 'hi': 'अरहर / तुअर (Pigeon Peas)'},
-      'mothbeans': {'kn': 'ಮಟ್ಕಿ (Moth Beans)', 'hi': 'मोठ दाल (Moth Beans)'},
-      'mungbean': {'kn': 'ಹೆಸರು ಕಾಳು (Mung Bean)', 'hi': 'मूंग (Mung Bean)'},
-      'blackgram': {'kn': 'ಉದ್ದಿನ ಕಾಳು (Black Gram)', 'hi': 'उड़द (Black Gram)'},
-      'lentil': {'kn': 'ಮಸೂರ (Lentil)', 'hi': 'मसूर (Lentil)'},
-      'pomegranate': {'kn': 'ದಾಳಿಂಬೆ (Pomegranate)', 'hi': 'अनार (Pomegranate)'},
-      'banana': {'kn': 'ಬಾಳೆಹಣ್ಣು (Banana)', 'hi': 'केला (Banana)'},
-      'mango': {'kn': 'ಮಾವು (Mango)', 'hi': 'आम (Mango)'},
-      'grapes': {'kn': 'ದ್ರಾಕ್ಷಿ (Grapes)', 'hi': 'अंगूर (Grapes)'},
-      'watermelon': {'kn': 'ಕಲ್ಲಂಗಡಿ (Watermelon)', 'hi': 'तरबूज (Watermelon)'},
-      'muskmelon': {'kn': 'ಖರ್ಬೂಜ (Muskmelon)', 'hi': 'खरबूजा (Muskmelon)'},
-      'apple': {'kn': 'ಸೇಬು (Apple)', 'hi': 'सेब (Apple)'},
-      'orange': {'kn': 'ಕಿತ್ತಳೆ (Orange)', 'hi': 'संतरा (Orange)'},
-      'papaya': {'kn': 'ಪಪ್ಪಾಯಿ (Papaya)', 'hi': 'पपीता (Papaya)'},
-      'coconut': {'kn': 'ತೆಂಗಿನಕಾಯಿ (Coconut)', 'hi': 'नारियल (Coconut)'},
-      'cotton': {'kn': 'ಹತ್ತಿ (Cotton)', 'hi': 'कपास / सूत (Cotton)'},
-      'jute': {'kn': 'ಣಬು (Jute)', 'hi': 'जूट (Jute)'},
-      'coffee': {'kn': 'ಕಾಫಿ (Coffee)', 'hi': 'कॉफ़ी (Coffee)'},
+  static String translateCrop(String englishCropName, String langCode) {
+    if (langCode == 'en') return englishCropName;
+
+    final Map<String, Map<String, String>> cropNames = {
+      'apple': {'kn': 'ಸೇಬು', 'hi': 'सेब'},
+      'banana': {'kn': 'ಬಾಳೆಹಣ್ಣು', 'hi': 'केला'},
+      'blackgram': {'kn': 'ಉದ್ದು', 'hi': 'उड़द'},
+      'chickpea': {'kn': 'ಕಡಲೆ', 'hi': 'चना'},
+      'coconut': {'kn': 'ತೆಂಗಿನಕಾಯಿ', 'hi': 'नारियल'},
+      'coffee': {'kn': 'ಕಾಫಿ', 'hi': 'कॉफ़ी'},
+      'cotton': {'kn': 'ಹತ್ತಿ', 'hi': 'कपास'},
+      'grapes': {'kn': 'ದ್ರಾಕ್ಷಿ', 'hi': 'अंगूर'},
+      'jute': {'kn': 'ಣಬು', 'hi': 'पटसन'},
+      'kidneybeans': {'kn': 'ರಾಜ್ಮಾ', 'hi': 'राजमा'},
+      'lentil': {'kn': 'ಮಸೂರ್ ಬೇಳೆ', 'hi': 'मसूर'},
+      'maize': {'kn': 'ಮೆಕ್ಕೆಜೋಳ', 'hi': 'मक्का'},
+      'mango': {'kn': 'ಮಾವು', 'hi': 'आम'},
+      'mothbeans': {'kn': 'ಮತ್ ಬೇಳೆ', 'hi': 'मोठ'},
+      'mungbean': {'kn': 'ಹೆಸರುಕಾಳು', 'hi': 'मूंग'},
+      'muskmelon': {'kn': 'ಖರ್ಬೂಜ', 'hi': 'खरबूजा'},
+      'orange': {'kn': 'ಕಿತ್ತಳೆ', 'hi': 'संतरा'},
+      'papaya': {'kn': 'ಪಪ್ಪಾಯಿ', 'hi': 'पपीता'},
+      'pigeonpeas': {'kn': 'ತೊಗರಿ ಬೇಳೆ', 'hi': 'अरहर'},
+      'pomegranate': {'kn': 'ದಾಳಿಂಬೆ', 'hi': 'अनार'},
+      'rice': {'kn': 'ಅಕ್ಕಿ / ಭತ್ತ', 'hi': 'चावल / धान'},
+      'watermelon': {'kn': 'ಕಲ್ಲಂಗಡಿ', 'hi': 'तरबूज'},
     };
-    final lower = cropName.toLowerCase().trim();
-    if (cropMap.containsKey(lower) && cropMap[lower]!.containsKey(langCode)) {
-      return cropMap[lower]![langCode]!;
+
+    final lower = englishCropName.toLowerCase().replaceAll(' ', '');
+    if (cropNames.containsKey(lower) && cropNames[lower]!.containsKey(langCode)) {
+      return '${cropNames[lower]![langCode]} ($englishCropName)';
     }
-    return cropName.toUpperCase();
+
+    return englishCropName;
   }
 }

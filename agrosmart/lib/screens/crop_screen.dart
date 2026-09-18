@@ -123,9 +123,10 @@ class _CropScreenState extends State<CropScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -138,7 +139,7 @@ class _CropScreenState extends State<CropScreen> {
           children: [
             Text(
               settings.getText('enter_params'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             ),
             const SizedBox(height: 20),
             _buildParamSliderField(
@@ -147,7 +148,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _nValue,
               min: 0,
               max: 140,
-              color: Colors.green.shade700,
+              color: const Color(0xFF10B981),
               onChanged: (val) {
                 setState(() {
                   _nValue = val;
@@ -161,7 +162,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _pValue,
               min: 0,
               max: 145,
-              color: Colors.teal.shade700,
+              color: const Color(0xFF059669),
               onChanged: (val) {
                 setState(() {
                   _pValue = val;
@@ -175,7 +176,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _kValue,
               min: 0,
               max: 205,
-              color: Colors.green.shade800,
+              color: const Color(0xFF047857),
               onChanged: (val) {
                 setState(() {
                   _kValue = val;
@@ -189,7 +190,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _tempValue,
               min: 0,
               max: 50,
-              color: Colors.orange.shade700,
+              color: const Color(0xFFD97706),
               isDecimal: true,
               onChanged: (val) {
                 setState(() {
@@ -204,7 +205,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _humidityValue,
               min: 0,
               max: 100,
-              color: Colors.blue.shade700,
+              color: const Color(0xFF0284C7),
               isDecimal: true,
               onChanged: (val) {
                 setState(() {
@@ -219,7 +220,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _phValue,
               min: 0,
               max: 14,
-              color: Colors.purple.shade700,
+              color: const Color(0xFF7C3AED),
               isDecimal: true,
               onChanged: (val) {
                 setState(() {
@@ -234,7 +235,7 @@ class _CropScreenState extends State<CropScreen> {
               value: _rainfallValue,
               min: 0,
               max: 300,
-              color: Colors.indigo.shade700,
+              color: const Color(0xFF0D9488),
               isDecimal: true,
               onChanged: (val) {
                 setState(() {
@@ -246,13 +247,13 @@ class _CropScreenState extends State<CropScreen> {
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 50,
               child: ElevatedButton.icon(
                 onPressed: _isLoading ? null : _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade800,
+                  backgroundColor: const Color(0xFF10B981),
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 icon: _isLoading
                     ? const SizedBox(
@@ -260,8 +261,11 @@ class _CropScreenState extends State<CropScreen> {
                         height: 22,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
-                    : const Icon(Icons.search),
-                label: Text(_isLoading ? settings.getText('voice_listening') : settings.getText('recommend_crop'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Icon(Icons.grass),
+                label: Text(
+                  _isLoading ? settings.getText('voice_listening') : settings.getText('recommend_crop'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ],
@@ -270,85 +274,146 @@ class _CropScreenState extends State<CropScreen> {
     );
 
     Widget resultsCard = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_errorMessage != null)
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
-            child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-          ),
-        if (_recommendations.isNotEmpty) ...[
-          const Text('Top Recommendations', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _recommendations.length,
-            itemBuilder: (context, index) {
-              final item = _recommendations[index];
-              final rawCropName = item['crop'] ?? '';
-              final translatedCrop = TranslationService.translateCrop(rawCropName, settings.languageCode);
-              final prob = item['prob'] ?? 0.0;
-              return Card(
-                elevation: 3,
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 24,
-                        backgroundColor: Colors.green.shade100,
-                        child: Text('${index + 1}', style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(translatedCrop, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value: (prob as num) / 100,
-                                backgroundColor: Colors.grey.shade200,
-                                color: Colors.green.shade700,
-                                minHeight: 8,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Text('$prob%', style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold, fontSize: 18)),
-                    ],
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.red.shade300, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 28),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
-        ] else if (isWide)
+        if (_recommendations.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(24.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Recommended Crops',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                ),
+                const Divider(height: 24),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _recommendations.length,
+                  itemBuilder: (context, index) {
+                    final item = _recommendations[index];
+                    final rawCrop = item['crop'] ?? '';
+                    final translatedCrop = TranslationService.translateCrop(rawCrop, settings.languageCode);
+                    final prob = (item['prob'] as num).toDouble();
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: index == 0 ? const Color(0x1510B981) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: index == 0 ? const Color(0xFF10B981) : const Color(0xFFE2E8F0),
+                          width: index == 0 ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: index == 0 ? const Color(0xFF10B981) : Colors.grey.shade200,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.eco,
+                              color: index == 0 ? Colors.white : Colors.grey.shade600,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  translatedCrop.toUpperCase(),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: index == 0 ? const Color(0xFF047857) : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                LinearProgressIndicator(
+                                  value: prob / 100,
+                                  backgroundColor: Colors.grey.shade200,
+                                  color: index == 0 ? const Color(0xFF10B981) : Colors.grey.shade600,
+                                  minHeight: 6,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Text(
+                            '$prob%',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: index == 0 ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          )
+        else if (isWide)
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.green.shade50,
+              color: const Color(0x1510B981),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.green.shade200),
+              border: Border.all(color: const Color(0x4410B981)),
             ),
-            child: Column(
+            child: const Column(
               children: [
-                Icon(Icons.grass, size: 64, color: Colors.green.shade700),
-                const SizedBox(height: 16),
-                const Text('AI Crop Advisor Ready', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
+                Icon(Icons.grass, size: 64, color: Color(0xFF10B981)),
+                SizedBox(height: 16),
+                Text('AI Crop Advice Ready', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                SizedBox(height: 8),
                 Text(
-                  'Adjust the soil and weather parameters on the left and click "Recommend Best Crop" to see instant ML predictions.',
+                  'Adjust the soil NPK sliders on the left and click "Recommend Best Crop" to run Random Forest AI classification.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                  style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
                 ),
               ],
             ),
@@ -391,7 +456,7 @@ class _CropScreenState extends State<CropScreen> {
     bool isDecimal = false,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18.0),
+      padding: const EdgeInsets.only(bottom: 16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -400,50 +465,31 @@ class _CropScreenState extends State<CropScreen> {
             children: [
               Text(
                 label,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
               ),
               SizedBox(
-                width: 80,
-                height: 38,
+                width: 70,
+                height: 36,
                 child: TextFormField(
                   controller: controller,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
                   decoration: InputDecoration(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  validator: (val) {
-                    if (val == null || val.isEmpty || double.tryParse(val) == null) {
-                      return '!';
-                    }
-                    return null;
-                  },
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    activeTrackColor: color,
-                    inactiveTrackColor: color.withValues(alpha: 0.15),
-                    thumbColor: color,
-                    trackHeight: 6,
-                  ),
-                  child: Slider(
-                    value: value.clamp(min, max),
-                    min: min,
-                    max: max,
-                    onChanged: onChanged,
-                  ),
-                ),
-              ),
-            ],
+          Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            activeColor: color,
+            inactiveColor: color.withValues(alpha: 0.2),
+            onChanged: onChanged,
           ),
         ],
       ),

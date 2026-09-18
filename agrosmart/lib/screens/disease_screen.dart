@@ -110,9 +110,10 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -122,7 +123,7 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
         children: [
           Text(
             settings.getText('upload_prompt'),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
@@ -130,9 +131,9 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
             height: 260,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
+              color: const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.green.shade200, width: 2),
+              border: Border.all(color: const Color(0x3310B981), width: 2),
             ),
             child: _imageBytes != null
                 ? ClipRRect(
@@ -147,9 +148,9 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
                     : Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add_a_photo_rounded, size: 64, color: Colors.green.shade400),
+                          const Icon(Icons.add_a_photo_rounded, size: 64, color: Color(0xFF10B981)),
                           const SizedBox(height: 12),
-                          Text(settings.getText('no_image'), style: TextStyle(color: Colors.grey.shade600, fontSize: 15)),
+                          Text(settings.getText('no_image'), style: const TextStyle(color: Color(0xFF64748B), fontSize: 15)),
                         ],
                       ),
           ),
@@ -160,7 +161,7 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () => _pickImage(ImageSource.gallery),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal.shade600,
+                    backgroundColor: const Color(0xFF0D9488),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -175,7 +176,7 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () => _pickImage(ImageSource.camera),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade600,
+                      backgroundColor: const Color(0xFF10B981),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -191,11 +192,11 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
           if (_imageFile != null || _imageBytes != null)
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 50,
               child: ElevatedButton.icon(
                 onPressed: _isLoading ? null : _analyzeImage,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade800,
+                  backgroundColor: const Color(0xFF10B981),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
@@ -243,9 +244,10 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
+                  color: Colors.black.withValues(alpha: 0.04),
                   blurRadius: 15,
                   offset: const Offset(0, 5),
                 ),
@@ -254,26 +256,26 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(settings.getText('detection_result'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(settings.getText('detection_result'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                 const Divider(height: 24),
-                Text(settings.getText('disease_condition'), style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                Text(settings.getText('disease_condition'), style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                 const SizedBox(height: 4),
                 Text(
                   _result!['label'] ?? 'Unknown',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green.shade800),
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
                 ),
                 const SizedBox(height: 14),
-                Text(settings.getText('confidence'), style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                Text(settings.getText('confidence'), style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
                 const SizedBox(height: 4),
                 Text(
                   '${_result!['confidence']}%',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                 ),
                 if (_result!['disease_info'] != null && (_result!['disease_info'] as Map).isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  Text(settings.getText('treatment'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text(settings.getText('treatment'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
                   const SizedBox(height: 8),
-                  Text(_result!['disease_info']['description'] ?? 'No description available.', style: TextStyle(color: Colors.grey.shade800, height: 1.4)),
+                  Text(_result!['disease_info']['description'] ?? 'No description available.', style: const TextStyle(color: Color(0xFF475569), height: 1.4)),
                 ],
               ],
             ),
@@ -282,20 +284,20 @@ class _DiseaseScreenState extends State<DiseaseScreen> {
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.blue.shade50,
+              color: const Color(0x150284C7),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.blue.shade200),
+              border: Border.all(color: const Color(0x330284C7)),
             ),
-            child: Column(
+            child: const Column(
               children: [
-                Icon(Icons.bug_report, size: 64, color: Colors.blue.shade700),
-                const SizedBox(height: 16),
-                const Text('AI Leaf Diagnosis Ready', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
+                Icon(Icons.bug_report, size: 64, color: Color(0xFF0284C7)),
+                SizedBox(height: 16),
+                Text('AI Leaf Diagnosis Ready', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                SizedBox(height: 8),
                 Text(
                   'Upload or select a plant leaf image on the left and click "Analyze Plant Leaf" to run deep learning classification.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                  style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
                 ),
               ],
             ),

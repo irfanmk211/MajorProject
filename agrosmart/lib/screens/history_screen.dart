@@ -16,11 +16,16 @@ class HistoryScreen extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            color: Colors.green.shade700,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
             child: TabBar(
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
+              indicatorColor: const Color(0xFF10B981),
+              indicatorWeight: 3,
+              labelColor: const Color(0xFF10B981),
+              labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              unselectedLabelColor: const Color(0xFF64748B),
               tabs: [
                 Tab(text: settings.getText('crops')),
                 Tab(text: settings.getText('disease')),
@@ -32,23 +37,28 @@ class HistoryScreen extends StatelessWidget {
               children: [
                 // Crop History Tab
                 history.cropHistory.isEmpty
-                    ? Center(child: Text(settings.getText('no_data')))
+                    ? Center(child: Text(settings.getText('no_data'), style: const TextStyle(color: Color(0xFF64748B))))
                     : ListView.builder(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(24),
                         itemCount: history.cropHistory.length,
                         itemBuilder: (context, index) {
                           final item = history.cropHistory[index];
                           return Card(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            elevation: 1,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(color: Color(0xFFE2E8F0)),
+                            ),
                             child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                               leading: CircleAvatar(
-                                backgroundColor: Colors.green.shade100,
-                                child: Icon(Icons.grass, color: Colors.green.shade800),
+                                backgroundColor: const Color(0x2210B981),
+                                child: const Icon(Icons.grass, color: Color(0xFF10B981)),
                               ),
-                              title: Text(item['crop'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text('Date: ${item['date']}'),
-                              trailing: Text('${item['confidence']}%', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+                              title: Text(item['crop'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                              subtitle: Text('Date: ${item['date']}', style: const TextStyle(color: Color(0xFF64748B))),
+                              trailing: Text('${item['confidence']}%', style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 15)),
                             ),
                           );
                         },
@@ -56,24 +66,29 @@ class HistoryScreen extends StatelessWidget {
 
                 // Disease History Tab
                 history.diseaseHistory.isEmpty
-                    ? Center(child: Text(settings.getText('no_data')))
+                    ? Center(child: Text(settings.getText('no_data'), style: const TextStyle(color: Color(0xFF64748B))))
                     : ListView.builder(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(24),
                         itemCount: history.diseaseHistory.length,
                         itemBuilder: (context, index) {
                           final item = history.diseaseHistory[index];
                           return Card(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            elevation: 1,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(color: Color(0xFFE2E8F0)),
+                            ),
                             child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                               leading: CircleAvatar(
-                                backgroundColor: Colors.orange.shade100,
-                                child: Icon(Icons.bug_report, color: Colors.orange.shade800),
+                                backgroundColor: const Color(0x220284C7),
+                                child: const Icon(Icons.bug_report, color: Color(0xFF0284C7)),
                               ),
-                              title: Text(item['disease'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text('${item['treatment']}\nDate: ${item['date']}'),
+                              title: Text(item['disease'].toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                              subtitle: Text('${item['treatment']}\nDate: ${item['date']}', style: const TextStyle(color: Color(0xFF64748B))),
                               isThreeLine: true,
-                              trailing: Text('${item['confidence']}%', style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold)),
+                              trailing: Text('${item['confidence']}%', style: const TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 15)),
                             ),
                           );
                         },
