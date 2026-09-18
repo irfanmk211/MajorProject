@@ -355,21 +355,27 @@ def validate_plant_image(pil_img):
 
         # 1. Genuine Green Foliage: G is dominant over R and B
         green_mask = (g > r) & (g > b) & ((2 * g - r - b) > 12) & (g > 35)
+        green_ratio = np.sum(green_mask) / total_pixels
 
-        # 2. Chlorosis / Yellow Foliage: R and G are both high, G >= 0.80*R, B is low (absorbed by chlorophyll)
+        # 2. Chlorosis / Yellow Foliage: R and G are both high, G >= 0.85*R, B is low (absorbed by chlorophyll)
         yellow_leaf_mask = (
-            (g >= 0.80 * r) & (g > 1.25 * b) & (g > 50) &
-            (h >= 20) & (h <= 45) & (s >= 40)
+            (g >= 0.85 * r) & (g > 1.30 * b) & (g > 50) &
+            (h >= 20) & (h <= 45) & (s >= 35)
         )
+        yellow_ratio = np.sum(yellow_leaf_mask) / total_pixels
 
-        # 3. Brown / Necrotic Blighted Leaf: R >= G, G > 1.15*B, R - G is modest (< 35)
+        # Combined vegetative living leaf tissue
+        vegetative_ratio = green_ratio + yellow_ratio
+
+        # 3. Brown / Necrotic Blighted Leaf: R >= G, G > 1.15*B, R - G is modest (< 30)
         brown_leaf_mask = (
-            (r >= g) & (g > 1.15 * b) & ((r - g) < 35) &
-            (h >= 10) & (h <= 24) & (s >= 35) & (v >= 25) & (v <= 170)
+            (r >= g) & (g > 1.15 * b) & ((r - g) < 30) &
+            (h >= 10) & (h <= 24) & (s >= 35) & (v >= 25) & (v <= 160)
         )
+        brown_leaf_ratio = np.sum(brown_leaf_mask) / total_pixels
 
-        plant_mask = green_mask | yellow_leaf_mask | brown_leaf_mask
-        plant_ratio = np.sum(plant_mask) / total_pixels
+        # Total Botanical Leaf Tissue
+        plant_ratio = vegetative_ratio + brown_leaf_ratio
 
         # 4. Sky / Sea / Water Detection: Blue is dominant (B > G or B > R)
         sky_sea_mask = ((b > g) | (b > r)) & (b > 60)
@@ -379,25 +385,29 @@ def validate_plant_image(pil_img):
         skin_mask = (r > g) & (g > b) & ((r - g) > 20) & (h >= 0) & (h <= 20) & (s >= 30) & (s <= 180) & (v >= 50)
         skin_ratio = np.sum(skin_mask) / total_pixels
 
-        # 6. Sand / Earth / Warm Sunset background (R >> G, R - G > 40)
-        sand_sunset_mask = (r > g) & ((r - g) > 40) & (v > 70)
+        # 6. Sand / Earth / Warm Sunset / Mud background (R >> G, R - G > 35)
+        sand_sunset_mask = (r > g) & ((r - g) > 35) & (v > 60)
         sand_sunset_ratio = np.sum(sand_sunset_mask) / total_pixels
 
-        # Rejection: Landscape / Sea / Sky / Beach dominance
+        # Rejection Rule 1: Every plant leaf image MUST have at least 8% living green or chlorosis yellow foliage
+        if vegetative_ratio < 0.08 and green_ratio < 0.05:
+            return False, "No plant leaf detected. Please upload a clear photo of a plant leaf or crop."
+
+        # Rejection Rule 2: Landscape / Sea / Sky / Beach dominance
         if sky_sea_ratio > 0.25 and plant_ratio < 0.35:
             return False, "No plant leaf detected (outdoor landscape/sky/water detected). Please upload a close-up photo of a plant leaf."
 
-        # Rejection: Sand / Beach / Sunset dominance
+        # Rejection Rule 3: Sand / Beach / Mud dominance
         if sand_sunset_ratio > 0.30 and plant_ratio < 0.25:
-            return False, "No plant leaf detected (beach/sunset/landscape detected). Please upload a close-up photo of a plant leaf."
+            return False, "No plant leaf detected (beach/mud/landscape detected). Please upload a close-up photo of a plant leaf."
 
-        # Rejection: Human selfie / face / body
+        # Rejection Rule 4: Human selfie / face / body
         if skin_ratio > 0.25 and plant_ratio < 0.15:
             return False, "Human face/skin detected. Please upload a clear photo of a plant leaf or crop."
 
-        # Rejection: Minimum plant leaf requirement
-        if plant_ratio < 0.15:
-            return False, "No plant leaf detected in the image. Please upload a clear, focused photo of a crop leaf."
+        # Rejection Rule 5: Total leaf tissue must be at least 18% of the image
+        if plant_ratio < 0.18:
+            return False, "The image does not contain sufficient plant foliage. Please upload a closer, focused photo of a leaf."
 
         return True, "Valid plant image"
     except Exception:
