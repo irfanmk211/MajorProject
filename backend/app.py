@@ -77,7 +77,11 @@ DISEASE_MODEL_PATH = os.path.join(BASE_DIR, "plant_disease_model.keras")
 if not os.path.exists(DISEASE_MODEL_PATH):
     DISEASE_MODEL_PATH = os.path.join(MODELS_DIR, "plant_disease_model.keras")
 
-CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.txt")
+CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
+if not os.path.exists(CLASS_NAMES_PATH):
+    CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.txt")
+if not os.path.exists(CLASS_NAMES_PATH):
+    CLASS_NAMES_PATH = os.path.join(MODELS_DIR, "class_names.json")
 if not os.path.exists(CLASS_NAMES_PATH):
     CLASS_NAMES_PATH = os.path.join(MODELS_DIR, "class_names.txt")
 
@@ -121,8 +125,11 @@ if os.path.exists(DISEASE_INFO_PATH):
 
 if os.path.exists(CLASS_NAMES_PATH):
     with open(CLASS_NAMES_PATH, "r", encoding="utf-8") as f:
-        disease_class_names = [line.strip() for line in f if line.strip()]
-    print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names.")
+        if CLASS_NAMES_PATH.endswith(".json"):
+            disease_class_names = json.load(f)
+        else:
+            disease_class_names = [line.strip() for line in f if line.strip()]
+    print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names from {CLASS_NAMES_PATH}.")
 
 # Initialize TFLite model via ultra-lightweight ai_edge_litert, tflite_runtime or tf.lite (<15MB RAM)
 if os.path.exists(DISEASE_TFLITE_PATH):
@@ -366,13 +373,13 @@ def validate_plant_image(pil_img):
         green_ratio = green_pixels / total_pixels
         skin_ratio = skin_pixels / total_pixels
 
-        # Only reject if almost purely human skin/face with virtually zero leaf foliage
-        if skin_ratio > 0.60 and foliage_ratio < 0.05:
-            return False, "Human selfie/face detected. Please upload a clear photo of a crop or plant leaf."
+        # Reject pure human face/skin selfies (unless leaf is clearly in hand)
+        if skin_ratio > 0.45 and foliage_ratio < 0.10:
+            return False, "Human skin/face detected. Please upload a clear photo of a plant leaf or crop."
 
-        # Only reject if virtually zero botanical or vegetation pixels (e.g. solid white wall, computer screen)
-        if foliage_ratio < 0.03 and green_ratio < 0.02 and skin_ratio < 0.05:
-            return False, "No plant leaf detected in the image. Please upload a clear photo of a crop or plant leaf."
+        # Require at least 8% foliage/green vegetation
+        if foliage_ratio < 0.08 and green_ratio < 0.05:
+            return False, "No plant leaf detected in the image. Please upload a clear photo of a plant leaf or crop."
 
         return True, "Valid plant image"
     except Exception:
@@ -492,7 +499,7 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check for extreme noise/outliers (random baseline on 90 classes is 1.1%)
+        # Confidence threshold check for extreme noise/outliers (random baseline on 81 classes is 1.2%)
         if confidence < 10.0:
             return jsonify({
                 "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
