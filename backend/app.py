@@ -358,10 +358,14 @@ def validate_plant_image(pil_img):
         hsv = np.array(pil_img.convert('HSV'))
         h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
-        # Botanical foliage hues: Green (28-115), Diseased Brown/Yellow (18-28 with S > 60)
+        # Botanical foliage hues: 
+        # - Healthy Green (H: 28-115, S >= 25, V >= 25)
+        # - Chlorosis / Yellowing (H: 18-28, S >= 50, V >= 30, G >= B)
+        # - Brown / Dried / Necrotic Blight (H: 10-22, S >= 35, V: 20-180, R >= G >= B)
         foliage_mask = (
-            ((h >= 28) & (h <= 115) & (s >= 30) & (v >= 30)) |
-            ((h >= 18) & (h < 28) & (s >= 65) & (v >= 30) & (g >= b))
+            ((h >= 28) & (h <= 115) & (s >= 25) & (v >= 25)) |
+            ((h >= 18) & (h < 28) & (s >= 50) & (v >= 30) & (g >= b)) |
+            ((h >= 10) & (h < 22) & (s >= 35) & (v >= 20) & (v <= 180) & (r >= g) & (g >= b))
         )
         foliage_pixels = np.sum(foliage_mask)
 
