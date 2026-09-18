@@ -48,48 +48,66 @@ export default function Disease() {
     handleFile(e.dataTransfer.files[0]);
   }, []);
 
-const handleUpload = async () => {
-  if (!file) {
-    alert("Please upload a leaf image first");
-    return;
-  }
-
-  setLoading(true);
-  setResult(null);
-
-  const formData = new FormData();
-  formData.append("image", file);
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/predict-disease`, {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await res.json();
-
-    console.log("Backend response:", data);
-
-    if (res.ok && data.success) {
-      const transformedResult = {
-        label: data.prediction.label,
-        confidence: data.prediction.confidence,
-        message: data.message || null,
-        disease_info: data.disease_info || null,
-        top_predictions: data.top_predictions || [],
-      };
-
-      setResult(transformedResult);
-    } else {
-      alert(data.error || "Prediction failed. Please try again.");
+  const handleUpload = async () => {
+    if (!file) {
+      alert("Please upload a leaf image first");
+      return;
     }
-  } catch (err) {
-    console.error("Prediction error:", err);
-    alert("Cloud server is currently waking up or busy. Please try again in a moment.");
-  } finally {
+
+    setLoading(true);
+    setResult(null);
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    const executePrediction = async (attempt = 1) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/predict-disease`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const text = await res.text();
+        let data = {};
+        try {
+          data = JSON.parse(text);
+        } catch (parseErr) {
+          throw new Error("Server returned non-JSON response (possibly waking up).");
+        }
+
+        console.log("Backend response:", data);
+
+        if (res.ok && data.success) {
+          const transformedResult = {
+            label: data.prediction?.label || data.label,
+            confidence: data.prediction?.confidence || data.confidence,
+            message: data.message || null,
+            disease_info: data.disease_info || null,
+            top_predictions: data.top_predictions || [],
+          };
+
+          setResult(transformedResult);
+        } else {
+          alert(data.error || "Prediction failed. Please try again.");
+        }
+      } catch (err) {
+        console.error(`Prediction error (attempt ${attempt}):`, err);
+        if (attempt < 2) {
+          // Automatic 3s retry for cold starts
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          return executePrediction(attempt + 1);
+        }
+        alert("Cloud AI server is currently waking up or busy. Please try again in 10-15 seconds.");
+      } finally {
+        if (attempt >= 2) {
+          setLoading(false);
+        }
+      }
+    };
+
+    await executePrediction(1);
     setLoading(false);
-  }
-};
+  };
   const diseaseInfo = (result?.disease_info && result.disease_info.description) 
     ? result.disease_info 
     : (result ? getDiseaseInfo(result.label) : null);
