@@ -204,6 +204,38 @@ export default function Disease() {
             </div>
           </GlassCard>
 
+          {result.top_predictions && result.top_predictions.length > 1 && (
+            <GlassCard>
+              <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Top Diagnostic Probabilities
+              </h4>
+              <div className="space-y-3">
+                {result.top_predictions.map((pred, i) => (
+                  <div key={i} className="flex flex-col space-y-1">
+                    <div className="flex justify-between text-sm font-medium">
+                      <span className="text-slate-700 dark:text-slate-200">
+                        {formatDiseaseName(pred.label)}
+                      </span>
+                      <span className="font-bold text-agri-600 dark:text-agri-400">
+                        {pred.confidence}%
+                      </span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          i === 0
+                            ? "bg-gradient-to-r from-agri-500 to-emerald-400"
+                            : "bg-slate-300 dark:bg-slate-600"
+                        }`}
+                        style={{ width: `${Math.min(pred.confidence, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
+
           {result.message && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
