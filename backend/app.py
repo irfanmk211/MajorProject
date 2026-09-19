@@ -390,7 +390,7 @@ app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=pr
 def validate_plant_image(pil_img):
     try:
         # =============================================================
-        # 1. PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
+        # PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
         # =============================================================
         if gatekeeper_interpreter is not None and imagenet_class_names:
             try:
@@ -417,80 +417,14 @@ def validate_plant_image(pil_img):
 
                 is_plant_keyword = any(k in top_gk_label.lower() for k in plant_safe_keywords)
 
-                # If Deep Learning model clearly identifies a non-plant (e.g. turtle, terrapin, dog, car, seashore)
-                if not is_plant_keyword and top_gk_conf > 0.15:
+                # If Deep Learning model clearly identifies a non-plant (e.g. turtle, terrapin, dog, car, vehicle) with strong confidence
+                if not is_plant_keyword and top_gk_conf > 0.35:
                     if (top_gk_idx < 398) or (400 <= top_gk_idx <= 900) or (970 <= top_gk_idx <= 980):
                         clean_name = top_gk_label.replace('_', ' ').title()
                         print(f"[GATEKEEPER] Rejected non-plant object: {clean_name} (Confidence: {top_gk_conf*100:.1f}%)")
-                        return False, f"Non-plant entity detected ({clean_name}). Please upload a clear photo of an agricultural crop leaf."
+                        return False, f"Non-plant entity detected ({clean_name}). Please upload a photo of a plant leaf."
             except Exception as e_gk_run:
                 print(f"[GATEKEEPER] Notice during inference: {e_gk_run}")
-
-        # =============================================================
-        # 2. BOTANICAL CHLOROPHYLL & SPECTRAL REINFORCEMENT
-        # =============================================================
-        rgb = np.array(pil_img.convert('RGB'), dtype=np.float32)
-        r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
-        total_pixels = rgb.shape[0] * rgb.shape[1]
-
-        hsv = np.array(pil_img.convert('HSV'))
-        h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-
-        # 1. Genuine Green Foliage: G is dominant over R and B
-        green_mask = (g > r) & (g > b) & ((2 * g - r - b) > 12) & (g > 35)
-        green_ratio = np.sum(green_mask) / total_pixels
-
-        # 2. Chlorosis / Yellow Foliage: R and G are both high, G >= 0.85*R, B is low (absorbed by chlorophyll)
-        yellow_leaf_mask = (
-            (g >= 0.85 * r) & (g > 1.30 * b) & (g > 50) &
-            (h >= 20) & (h <= 45) & (s >= 35)
-        )
-        yellow_ratio = np.sum(yellow_leaf_mask) / total_pixels
-
-        # Combined vegetative living leaf tissue
-        vegetative_ratio = green_ratio + yellow_ratio
-
-        # 3. Brown / Necrotic Blighted Leaf: R >= G, G > 1.15*B, R - G is modest (< 30)
-        brown_leaf_mask = (
-            (r >= g) & (g > 1.15 * b) & ((r - g) < 30) &
-            (h >= 10) & (h <= 24) & (s >= 35) & (v >= 25) & (v <= 160)
-        )
-        brown_leaf_ratio = np.sum(brown_leaf_mask) / total_pixels
-
-        # Total Botanical Leaf Tissue
-        plant_ratio = vegetative_ratio + brown_leaf_ratio
-
-        # 4. Sky / Sea / Water Detection: Blue is dominant (B > G or B > R)
-        sky_sea_mask = ((b > g) | (b > r)) & (b > 60)
-        sky_sea_ratio = np.sum(sky_sea_mask) / total_pixels
-
-        # 5. Human Skin Detection (R > G > B, R - G > 20, H in 0-20, S in 30-180, V > 50)
-        skin_mask = (r > g) & (g > b) & ((r - g) > 20) & (h >= 0) & (h <= 20) & (s >= 30) & (s <= 180) & (v >= 50)
-        skin_ratio = np.sum(skin_mask) / total_pixels
-
-        # 6. Sand / Earth / Warm Sunset / Mud background (R >> G, R - G > 35)
-        sand_sunset_mask = (r > g) & ((r - g) > 35) & (v > 60)
-        sand_sunset_ratio = np.sum(sand_sunset_mask) / total_pixels
-
-        # Rejection Rule 1: Every plant leaf image MUST have at least 8% living green or chlorosis yellow foliage
-        if vegetative_ratio < 0.08 and green_ratio < 0.05:
-            return False, "No plant leaf detected. Please upload a clear photo of a plant leaf or crop."
-
-        # Rejection Rule 2: Landscape / Sea / Sky / Beach dominance
-        if sky_sea_ratio > 0.25 and plant_ratio < 0.35:
-            return False, "No plant leaf detected (outdoor landscape/sky/water detected). Please upload a close-up photo of a plant leaf."
-
-        # Rejection Rule 3: Sand / Beach / Mud dominance
-        if sand_sunset_ratio > 0.30 and plant_ratio < 0.25:
-            return False, "No plant leaf detected (beach/mud/landscape detected). Please upload a close-up photo of a plant leaf."
-
-        # Rejection Rule 4: Human selfie / face / body
-        if skin_ratio > 0.25 and plant_ratio < 0.15:
-            return False, "Human face/skin detected. Please upload a clear photo of a plant leaf or crop."
-
-        # Rejection Rule 5: Total leaf tissue must be at least 18% of the image
-        if plant_ratio < 0.18:
-            return False, "The image does not contain sufficient plant foliage. Please upload a closer, focused photo of a leaf."
 
         return True, "Valid plant image"
     except Exception:
@@ -581,7 +515,7 @@ def predict_disease():
         except ValueError as ve:
             return jsonify({"error": str(ve), "success": False}), 400
 
-        # Botanical / Non-plant validation check
+        # Botanical / Non-plant validation check via Deep Learning Gatekeeper
         is_plant, val_msg = validate_plant_image(pil_img)
         if not is_plant:
             return jsonify({
@@ -609,14 +543,6 @@ def predict_disease():
 
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
-
-        # Confidence threshold check for extreme noise/outliers (random baseline on 81 classes is 1.2%)
-        if confidence < 15.0:
-            return jsonify({
-                "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
-                "is_leaf": False,
-                "success": False
-            }), 400
 
         if disease_class_names and top_idx < len(disease_class_names):
             label = disease_class_names[top_idx]
