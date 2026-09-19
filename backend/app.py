@@ -387,10 +387,48 @@ app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=pr
 # ---------------------------------------------------------------------
 # PLANT LEAF BOTANICAL & OOD IMAGE VALIDATOR (OPTION 2 DEEP GATEKEEPER)
 # ---------------------------------------------------------------------
+def check_text_document(pil_img):
+    """
+    Rapidly detects text documents, marksheets, certificates, receipts,
+    and printed pages via statistical color and high-contrast edge variance.
+    """
+    try:
+        rgb = pil_img.convert('RGB')
+        arr = np.array(rgb, dtype=np.float32)
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        max_c = np.maximum(np.maximum(r, g), b)
+        min_c = np.minimum(np.minimum(r, g), b)
+        delta = max_c - min_c
+
+        # Saturation calculation
+        sat = np.where(max_c > 0, delta / np.maximum(max_c, 1e-5), 0.0)
+        mean_sat = float(np.mean(sat))
+        mean_val = float(np.mean(max_c) / 255.0)
+
+        # High-contrast edge density (characteristic of typography and text glyphs)
+        gray = np.dot(arr[..., :3], [0.2989, 0.5870, 0.1140])
+        dx = np.diff(gray, axis=1)
+        dy = np.diff(gray, axis=0)
+        edge_density = float((np.mean(np.abs(dx) > 30) + np.mean(np.abs(dy) > 30)) / 2.0)
+
+        # Bright/white background with low saturation and distinct text edges
+        if mean_sat < 0.15 and mean_val > 0.65 and edge_density > 0.02:
+            return True, f"Text document or sheet detected (Saturation: {mean_sat*100:.1f}%, Brightness: {mean_val*100:.1f}%)."
+    except Exception as e:
+        pass
+    return False, ""
+
+
 def validate_plant_image(pil_img):
     try:
+        # 1. Fast Document / Marksheet / Text Scan Filter
+        is_doc, doc_msg = check_text_document(pil_img)
+        if is_doc:
+            print(f"[GATEKEEPER] Document filter caught: {doc_msg}")
+            return False, "Document or text sheet detected. Please upload a clear photo of a crop or plant leaf."
+
         # =============================================================
-        # PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
+        # 2. PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
         # =============================================================
         if gatekeeper_interpreter is not None and imagenet_class_names:
             try:
@@ -403,26 +441,47 @@ def validate_plant_image(pil_img):
                 gatekeeper_interpreter.invoke()
                 gk_preds = gatekeeper_interpreter.get_tensor(gatekeeper_output_details[0]['index'])[0]
 
-                top_gk_idx = int(np.argmax(gk_preds))
+                top5_idx = np.argsort(gk_preds)[::-1][:5]
+                top_gk_idx = int(top5_idx[0])
                 top_gk_conf = float(gk_preds[top_gk_idx])
-                top_gk_label = imagenet_class_names[top_gk_idx] if top_gk_idx < len(imagenet_class_names) else ""
+                top_gk_label = imagenet_class_names[top_gk_idx].lower() if top_gk_idx < len(imagenet_class_names) else ""
+                top5_labels = [imagenet_class_names[i].lower() for i in top5_idx if i < len(imagenet_class_names)]
 
-                # Plant-compatible categories in ImageNet
+                # Plant & Botanical Safe Keywords
                 plant_safe_keywords = [
                     'leaf', 'tree', 'flower', 'daisy', 'rose', 'pot', 'vase', 'greenhouse', 'plant',
                     'cabbage', 'broccoli', 'cauliflower', 'zucchini', 'squash', 'cucumber', 'artichoke',
                     'cardoon', 'mushroom', 'rapeseed', 'corn', 'ear', 'hay', 'banana', 'orange', 'lemon',
-                    'fig', 'pineapple', 'custard_apple', 'pomegranate', 'strawberry', 'acorn', 'slipper'
+                    'fig', 'pineapple', 'custard_apple', 'pomegranate', 'strawberry', 'acorn', 'slipper',
+                    'agaric', 'gyromitra', 'stinkhorn', 'earthstar', 'hen-of-the-woods', 'bolete', 'bell_pepper',
+                    'jackfruit', 'butternut_squash', 'spaghetti_squash', 'acorn_squash', 'head_cabbage',
+                    'garden_spider', 'barn_spider', 'honeycomb'
                 ]
 
-                is_plant_keyword = any(k in top_gk_label.lower() for k in plant_safe_keywords)
+                # Explicit Document, Screen, Office, and Tech keywords in ImageNet
+                doc_or_tech_keywords = [
+                    'web_site', 'comic_book', 'crossword', 'book', 'menu', 'envelope', 'notebook',
+                    'paper', 'binder', 'carton', 'packet', 'screen', 'monitor', 'television', 'laptop',
+                    'desktop_computer', 'printer', 'cellular', 'telephone', 'switch', 'scoreboard',
+                    'poster', 'ruler', 'slide_rule', 'eraser', 'pencil', 'fountain_pen', 'ballpoint',
+                    'oscilloscope', 'vending_machine', 'washer', 'microwave'
+                ]
 
-                # If Deep Learning model clearly identifies a non-plant (e.g. turtle, terrapin, dog, car, vehicle) with strong confidence
-                if not is_plant_keyword and top_gk_conf > 0.35:
-                    if (top_gk_idx < 398) or (400 <= top_gk_idx <= 900) or (970 <= top_gk_idx <= 980):
-                        clean_name = top_gk_label.replace('_', ' ').title()
-                        print(f"[GATEKEEPER] Rejected non-plant object: {clean_name} (Confidence: {top_gk_conf*100:.1f}%)")
-                        return False, f"Non-plant entity detected ({clean_name}). Please upload a photo of a plant leaf."
+                # Document / Screen detection in Deep Model
+                is_doc_deep = any(any(dk in lbl for dk in doc_or_tech_keywords) for lbl in top5_labels[:3])
+                doc_conf_deep = sum(float(gk_preds[i]) for i in top5_idx if any(dk in imagenet_class_names[i].lower() for dk in doc_or_tech_keywords))
+
+                if is_doc_deep and doc_conf_deep > 0.15:
+                    clean_name = top_gk_label.replace('_', ' ').title()
+                    print(f"[GATEKEEPER] Deep model caught document/screen: {clean_name} ({doc_conf_deep*100:.1f}%)")
+                    return False, f"Document or screenshot detected ({clean_name}). Please upload a clear photo of a plant leaf."
+
+                # General Non-Plant Entity Check (Animals, Vehicles, Humans, Electronics, Clothes)
+                is_plant_keyword = any(k in top_gk_label for k in plant_safe_keywords)
+                if not is_plant_keyword and top_gk_conf > 0.20:
+                    clean_name = top_gk_label.replace('_', ' ').title()
+                    print(f"[GATEKEEPER] Rejected non-plant object: {clean_name} (Confidence: {top_gk_conf*100:.1f}%)")
+                    return False, f"Non-plant entity detected ({clean_name}). Please upload a photo of a plant leaf."
             except Exception as e_gk_run:
                 print(f"[GATEKEEPER] Notice during inference: {e_gk_run}")
 

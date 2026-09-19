@@ -1,13 +1,10 @@
 import { Link } from "react-router-dom";
 import { Leaf, Code, Mail, Phone } from "lucide-react";
 
-export default function Footer({ sidebarWidth = 260 }) {
+export default function Footer() {
   return (
-    <footer
-      style={{ marginLeft: sidebarWidth }}
-      className="border-t border-slate-200/50 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50"
-    >
-      <div className="mx-auto max-w-7xl px-6 py-12">
+    <footer className="border-t border-slate-200/60 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50 mt-auto">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="grid gap-8 md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2 mb-4">

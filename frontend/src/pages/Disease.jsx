@@ -34,12 +34,14 @@ export default function Disease() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleFile = (selected) => {
     if (!selected) return;
     setFile(selected);
     setPreview(URL.createObjectURL(selected));
     setResult(null);
+    setError(null);
   };
 
   const onDrop = useCallback((e) => {
@@ -50,12 +52,13 @@ export default function Disease() {
 
   const handleUpload = async () => {
     if (!file) {
-      alert("Please upload a leaf image first");
+      setError("Please upload a leaf image first.");
       return;
     }
 
     setLoading(true);
     setResult(null);
+    setError(null);
 
     const formData = new FormData();
     formData.append("image", file);
@@ -87,8 +90,9 @@ export default function Disease() {
           };
 
           setResult(transformedResult);
+          setError(null);
         } else {
-          alert(data.error || "Prediction failed. Please try again.");
+          setError(data.error || "Prediction failed. Please try again with a clear plant leaf photo.");
         }
       } catch (err) {
         console.error(`Prediction error (attempt ${attempt}):`, err);
@@ -97,7 +101,7 @@ export default function Disease() {
           await new Promise((resolve) => setTimeout(resolve, 3000));
           return executePrediction(attempt + 1);
         }
-        alert("Cloud AI server is currently waking up or busy. Please try again in 10-15 seconds.");
+        setError("Cloud AI server is currently waking up or busy. Please try again in 10-15 seconds.");
       } finally {
         if (attempt >= 2) {
           setLoading(false);
@@ -112,7 +116,7 @@ export default function Disease() {
     ? result.disease_info 
     : (result ? getDiseaseInfo(result.label) : null);
   const healthy = result ? isHealthy(result.label) : false;
-  const uncertain = result?.label === "Unknown";
+  const uncertain = result?.label === "Unknown" || result?.uncertain || (result?.confidence !== undefined && Number(result.confidence) < 45);
   const displayName = diseaseInfo?.displayName || (result ? formatDiseaseName(result.label) : "");
   const referenceImage = result ? getDiseaseImage(result.label) : null;
 
@@ -160,11 +164,27 @@ export default function Disease() {
 
         {preview && !loading && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6">
-            <img src={preview} alt="Preview" className="mx-auto max-h-64 rounded-2xl object-cover shadow-lg" />
+            <img src={preview} alt="Preview" className="mx-auto max-h-72 rounded-2xl object-contain bg-slate-900/5 dark:bg-black/20 p-2 shadow-lg" />
           </motion.div>
         )}
 
         {loading && <div className="mt-6"><ScanAnimation active={loading} imageUrl={preview} /></div>}
+
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-6 rounded-2xl border border-red-200 bg-red-50/90 p-4 dark:border-red-900/40 dark:bg-red-950/40"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 text-red-600 dark:text-red-400 shrink-0" size={20} />
+              <div>
+                <h4 className="font-semibold text-red-800 dark:text-red-200">Image Validation Alert</h4>
+                <p className="mt-1 text-sm text-red-700 dark:text-red-300">{error}</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         <div className="mt-6 flex justify-center">
           <RippleButton onClick={handleUpload} disabled={!file || loading}>
@@ -176,11 +196,11 @@ export default function Disease() {
       {result && diseaseInfo && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           <GlassCard glow>
-         <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Your Upload</p>
                 {preview && (
-                  <img src={preview} alt="Uploaded leaf" className="w-full rounded-2xl object-cover h-64 shadow-lg" />
+                  <img src={preview} alt="Uploaded leaf" className="w-full rounded-2xl object-contain max-h-72 bg-slate-900/5 dark:bg-black/20 p-2 shadow-lg" />
                 )}
               </div>
             
@@ -198,11 +218,29 @@ export default function Disease() {
                   }`}
                 >
                   {uncertain ? <AlertCircle size={16} /> : healthy ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
-                  {uncertain ? "Uncertain" : healthy ? "Healthy" : "Diseased"}
+                  {uncertain ? "Inconclusive / Low Confidence" : healthy ? "Healthy" : "Diseased"}
                 </span>
               </div>
             </div>
           </GlassCard>
+
+          {uncertain && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl border border-amber-300 bg-amber-50/90 p-4 dark:border-amber-700/40 dark:bg-amber-950/40 shadow-sm"
+            >
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" size={20} />
+                <div>
+                  <h4 className="font-semibold text-amber-900 dark:text-amber-200">Diagnostic Uncertainty Warning</h4>
+                  <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+                    The AI diagnosis confidence is low ({result.confidence}%). The uploaded image may not be an actual plant leaf or might have unusual lighting/obstructions. For reliable diagnosis, please upload a well-lit, close-up photo of an actual crop leaf.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {result.top_predictions && result.top_predictions.length > 1 && (
             <GlassCard>
