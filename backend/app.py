@@ -77,6 +77,15 @@ DISEASE_MODEL_PATH = os.path.join(BASE_DIR, "plant_disease_model.keras")
 if not os.path.exists(DISEASE_MODEL_PATH):
     DISEASE_MODEL_PATH = os.path.join(MODELS_DIR, "plant_disease_model.keras")
 
+# Open-Source ImageNet Pre-Trained Gatekeeper Model (Detects Plants vs Animals/Humans/Objects)
+GATEKEEPER_TFLITE_PATH = os.path.join(BASE_DIR, "plant_gatekeeper.tflite")
+if not os.path.exists(GATEKEEPER_TFLITE_PATH):
+    GATEKEEPER_TFLITE_PATH = os.path.join(MODELS_DIR, "plant_gatekeeper.tflite")
+
+IMAGENET_CLASSES_PATH = os.path.join(BASE_DIR, "imagenet_classes.json")
+if not os.path.exists(IMAGENET_CLASSES_PATH):
+    IMAGENET_CLASSES_PATH = os.path.join(MODELS_DIR, "imagenet_classes.json")
+
 CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
 if not os.path.exists(CLASS_NAMES_PATH):
     CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.txt")
@@ -107,13 +116,18 @@ crop_features = crop_model_data["features"]
 print(f"[CROP MODEL] Loaded successfully with {len(crop_label_encoder.classes_)} classes.")
 
 # =====================================================================
-# 2. DISEASE PREDICTION MODEL (SPACE & HANDLER FOR DISEASE RECOGNITION)
+# 2. DISEASE & GATEKEEPER PREDICTION MODELS
 # =====================================================================
 disease_model = None
 tflite_interpreter = None
 tflite_input_details = None
 tflite_output_details = None
 disease_class_names = []
+
+gatekeeper_interpreter = None
+gatekeeper_input_details = None
+gatekeeper_output_details = None
+imagenet_class_names = []
 
 # Load Disease Class Names & Agronomic Information Database
 disease_info_db = {}
@@ -131,7 +145,36 @@ if os.path.exists(CLASS_NAMES_PATH):
             disease_class_names = [line.strip() for line in f if line.strip()]
     print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names from {CLASS_NAMES_PATH}.")
 
-# Initialize TFLite model via ultra-lightweight ai_edge_litert, tflite_runtime or tf.lite (<15MB RAM)
+# Load ImageNet Classes for Gatekeeper
+if os.path.exists(IMAGENET_CLASSES_PATH):
+    with open(IMAGENET_CLASSES_PATH, "r", encoding="utf-8") as f:
+        imagenet_class_names = json.load(f)
+    print(f"[GATEKEEPER] Loaded {len(imagenet_class_names)} ImageNet class names.")
+
+# Initialize Open-Source Gatekeeper TFLite Model
+if os.path.exists(GATEKEEPER_TFLITE_PATH):
+    try:
+        try:
+            import ai_edge_litert.interpreter as tflite
+        except ImportError:
+            import tflite_runtime.interpreter as tflite
+        gatekeeper_interpreter = tflite.Interpreter(model_path=GATEKEEPER_TFLITE_PATH)
+        gatekeeper_interpreter.allocate_tensors()
+        gatekeeper_input_details = gatekeeper_interpreter.get_input_details()
+        gatekeeper_output_details = gatekeeper_interpreter.get_output_details()
+        print(f"[GATEKEEPER] Loaded pre-trained ImageNet model from: {GATEKEEPER_TFLITE_PATH}")
+    except Exception as e_gk:
+        try:
+            import tensorflow as tf
+            gatekeeper_interpreter = tf.lite.Interpreter(model_path=GATEKEEPER_TFLITE_PATH)
+            gatekeeper_interpreter.allocate_tensors()
+            gatekeeper_input_details = gatekeeper_interpreter.get_input_details()
+            gatekeeper_output_details = gatekeeper_interpreter.get_output_details()
+            print(f"[GATEKEEPER] Loaded pre-trained ImageNet model via tf.lite from: {GATEKEEPER_TFLITE_PATH}")
+        except Exception as e_gk2:
+            print(f"[GATEKEEPER] Could not load gatekeeper model: {e_gk} / {e_gk2}")
+
+# Initialize Plant Disease TFLite Model via ultra-lightweight runtime (<15MB RAM)
 if os.path.exists(DISEASE_TFLITE_PATH):
     try:
         try:
@@ -342,10 +385,50 @@ app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=pr
 
 
 # ---------------------------------------------------------------------
-# PLANT LEAF BOTANICAL & OOD IMAGE VALIDATOR
+# PLANT LEAF BOTANICAL & OOD IMAGE VALIDATOR (OPTION 2 DEEP GATEKEEPER)
 # ---------------------------------------------------------------------
 def validate_plant_image(pil_img):
     try:
+        # =============================================================
+        # 1. PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
+        # =============================================================
+        if gatekeeper_interpreter is not None and imagenet_class_names:
+            try:
+                gk_resized = pil_img.resize((224, 224))
+                gk_arr = np.array(gk_resized, dtype=np.float32)
+                gk_norm = (gk_arr / 127.5) - 1.0
+                gk_batch = np.expand_dims(gk_norm, axis=0)
+
+                gatekeeper_interpreter.set_tensor(gatekeeper_input_details[0]['index'], gk_batch)
+                gatekeeper_interpreter.invoke()
+                gk_preds = gatekeeper_interpreter.get_tensor(gatekeeper_output_details[0]['index'])[0]
+
+                top_gk_idx = int(np.argmax(gk_preds))
+                top_gk_conf = float(gk_preds[top_gk_idx])
+                top_gk_label = imagenet_class_names[top_gk_idx] if top_gk_idx < len(imagenet_class_names) else ""
+
+                # Plant-compatible categories in ImageNet
+                plant_safe_keywords = [
+                    'leaf', 'tree', 'flower', 'daisy', 'rose', 'pot', 'vase', 'greenhouse', 'plant',
+                    'cabbage', 'broccoli', 'cauliflower', 'zucchini', 'squash', 'cucumber', 'artichoke',
+                    'cardoon', 'mushroom', 'rapeseed', 'corn', 'ear', 'hay', 'banana', 'orange', 'lemon',
+                    'fig', 'pineapple', 'custard_apple', 'pomegranate', 'strawberry', 'acorn', 'slipper'
+                ]
+
+                is_plant_keyword = any(k in top_gk_label.lower() for k in plant_safe_keywords)
+
+                # If Deep Learning model clearly identifies a non-plant (e.g. turtle, terrapin, dog, car, seashore)
+                if not is_plant_keyword and top_gk_conf > 0.15:
+                    if (top_gk_idx < 398) or (400 <= top_gk_idx <= 900) or (970 <= top_gk_idx <= 980):
+                        clean_name = top_gk_label.replace('_', ' ').title()
+                        print(f"[GATEKEEPER] Rejected non-plant object: {clean_name} (Confidence: {top_gk_conf*100:.1f}%)")
+                        return False, f"Non-plant entity detected ({clean_name}). Please upload a clear photo of an agricultural crop leaf."
+            except Exception as e_gk_run:
+                print(f"[GATEKEEPER] Notice during inference: {e_gk_run}")
+
+        # =============================================================
+        # 2. BOTANICAL CHLOROPHYLL & SPECTRAL REINFORCEMENT
+        # =============================================================
         rgb = np.array(pil_img.convert('RGB'), dtype=np.float32)
         r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
         total_pixels = rgb.shape[0] * rgb.shape[1]
@@ -527,8 +610,8 @@ def predict_disease():
         top_idx = int(np.argmax(preds))
         confidence = round(float(preds[top_idx]) * 100, 2)
 
-        # Confidence threshold check for extreme noise/outliers (requires at least 50% confidence for diagnosis)
-        if confidence < 50.0:
+        # Confidence threshold check for extreme noise/outliers (random baseline on 81 classes is 1.2%)
+        if confidence < 15.0:
             return jsonify({
                 "error": f"The image does not clearly match any known plant disease (confidence too low: {confidence}%). Please upload a clearer, closer photo of a plant leaf.",
                 "is_leaf": False,
