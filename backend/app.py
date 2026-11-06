@@ -2,13 +2,22 @@ import os
 import json
 import base64
 import binascii
+import hashlib
+import hmac
 import numpy as np
 import pandas as pd
 import pickle
+import secrets
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from urllib.parse import quote
 
+import cloudinary
+import cloudinary.uploader
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials, firestore as admin_firestore, messaging
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 from PIL import Image
@@ -52,22 +61,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # CROP RECOMMENDATION MODEL
 # ============================================================
 
-# Change this path if your crop model is stored somewhere else.
-DATATRAIN_DIR = r"C:\Users\Irfan\OneDrive\Documents\Datatrain"
-
-CROP_MODEL_PATH = os.path.join(
-    DATATRAIN_DIR,
-    "crop_model.pkl"
-)
-
-# If the above path does not exist,
-# search inside the backend folder.
-if not os.path.exists(CROP_MODEL_PATH):
-
-    CROP_MODEL_PATH = os.path.join(
-        BASE_DIR,
-        "crop_model.pkl"
-    )
+CROP_MODEL_PATH = os.path.join(BASE_DIR, "crop_model.pkl")
 
 
 # ============================================================
@@ -94,6 +88,7 @@ IMG_SIZE = 224
 CONFIDENCE_THRESHOLD = 0.60
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_IMAGE_UPLOAD_SIZE = 5 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
     "jpg",
@@ -611,6 +606,535 @@ def home():
             "is running successfully!"
 
     })
+
+
+def get_firebase_admin_app():
+    try:
+        return firebase_admin.get_app("agrosmart-upload-auth")
+    except ValueError:
+        service_account_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if not service_account_json:
+            raise RuntimeError("Firebase Admin credentials are not configured.")
+        try:
+            service_account = json.loads(service_account_json)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("FIREBASE_SERVICE_ACCOUNT_JSON must contain valid JSON.") from error
+        expected_project = os.environ.get("FIREBASE_PROJECT_ID", "agrosmart-mp")
+        if service_account.get("project_id") != expected_project:
+            raise RuntimeError(f"Firebase service account must belong to {expected_project}.")
+        return firebase_admin.initialize_app(
+            credentials.Certificate(service_account),
+            name="agrosmart-upload-auth",
+        )
+
+
+def verify_user_request():
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        return None
+    try:
+        admin_app = get_firebase_admin_app()
+        return firebase_auth.verify_id_token(
+            authorization.removeprefix("Bearer "),
+            app=admin_app,
+        )
+    except RuntimeError as error:
+        print(f"[FIREBASE AUTH CONFIG ERROR] {error}")
+        return None
+    except firebase_admin.exceptions.FirebaseError:
+        return None
+
+
+def verify_device_request(admin_app):
+    device_id = request.headers.get("X-AgroSmart-Device", "").replace(":", "").replace("-", "").lower()
+    device_token = request.headers.get("X-AgroSmart-Token", "")
+    if len(device_id) != 12 or any(character not in "0123456789abcdef" for character in device_id):
+        return None
+    if len(device_token) < 32 or len(device_token) > 128:
+        return None
+
+    firestore = admin_firestore.client(app=admin_app)
+    device_query = firestore.collection_group("devices").where("deviceId", "==", device_id).limit(1).get()
+    if not device_query:
+        return None
+    device_ref = device_query[0].reference
+    device = device_query[0].to_dict() or {}
+    expected_hash = device.get("tokenHash", "")
+    token_hash = hashlib.sha256(device_token.encode("utf-8")).hexdigest()
+    if not expected_hash or not hmac.compare_digest(expected_hash, token_hash):
+        return None
+    return firestore, device_ref, device
+
+
+def send_user_pushes(firestore, user_id, title, body, data):
+    tokens = firestore.collection("users", user_id, "notification_tokens").stream()
+    for token_doc in tokens:
+        token = token_doc.to_dict().get("token")
+        if not token:
+            continue
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data={key: str(value) for key, value in data.items()},
+            token=token,
+            webpush=messaging.WebpushConfig(
+                notification=messaging.WebpushNotification(
+                    icon="/favicon.svg",
+                    data=data,
+                    actions=[
+                        {"action": "continue", "title": "Continue"},
+                        {"action": "stop", "title": "Stop"},
+                    ] if data.get("type") == "manual_timer_expired" else [],
+                ),
+                fcm_options=messaging.WebpushFCMOptions(link="/irrigation"),
+            ),
+        )
+        try:
+            messaging.send(message, app=get_firebase_admin_app())
+        except firebase_admin.exceptions.FirebaseError as error:
+            print(f"[PUSH ERROR] Could not notify user {user_id}: {error}")
+
+
+@app.route("/api/uploads/images", methods=["POST"])
+def upload_image():
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        return jsonify({"error": "Sign in before uploading an image."}), 401
+
+    try:
+        admin_app = get_firebase_admin_app()
+    except RuntimeError as error:
+        print(f"[IMAGE UPLOAD CONFIG ERROR] {error}")
+        return jsonify({"error": "Image uploads are not configured on the backend."}), 503
+
+    try:
+        decoded_token = firebase_auth.verify_id_token(
+            authorization.removeprefix("Bearer "),
+            app=admin_app,
+        )
+    except (firebase_admin.exceptions.FirebaseError, ValueError):
+        return jsonify({"error": "Your session is invalid or expired. Sign in again."}), 401
+
+    if not os.environ.get("CLOUDINARY_URL"):
+        return jsonify({"error": "Cloudinary is not configured on the backend."}), 503
+
+    if request.content_length is not None and request.content_length > MAX_IMAGE_UPLOAD_SIZE + 64 * 1024:
+        return jsonify({"error": "Image must be 5 MB or smaller."}), 413
+
+    image = request.files.get("image")
+    purpose = request.form.get("purpose")
+    if image is None:
+        return jsonify({"error": "An image file is required."}), 400
+    if purpose not in {"profile", "field"}:
+        return jsonify({"error": "Purpose must be 'profile' or 'field'."}), 400
+
+    image_bytes = image.stream.read(MAX_IMAGE_UPLOAD_SIZE + 1)
+    if not image_bytes:
+        return jsonify({"error": "The uploaded image is empty."}), 400
+    if len(image_bytes) > MAX_IMAGE_UPLOAD_SIZE:
+        return jsonify({"error": "Image must be 5 MB or smaller."}), 413
+
+    try:
+        uploaded_image = Image.open(BytesIO(image_bytes))
+        uploaded_image.verify()
+        image_format = uploaded_image.format
+    except Exception:
+        return jsonify({"error": "Upload a valid JPEG, PNG, or WEBP image."}), 400
+    if image_format not in {"JPEG", "PNG", "WEBP"}:
+        return jsonify({"error": "Upload a valid JPEG, PNG, or WEBP image."}), 400
+
+    folder = f"agrosmart/users/{decoded_token['uid']}/profile"
+    if purpose == "field":
+        farm_id = request.form.get("farmId", "")
+        field_id = request.form.get("fieldId", "")
+        if not farm_id or not field_id or any(
+            character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+            for character in farm_id + field_id
+        ):
+            return jsonify({"error": "A valid farm and field ID are required."}), 400
+        folder = f"agrosmart/users/{decoded_token['uid']}/farms/{farm_id}/fields/{field_id}"
+
+    try:
+        cloudinary.config(cloudinary_url=os.environ["CLOUDINARY_URL"])
+        result = cloudinary.uploader.upload(
+            BytesIO(image_bytes),
+            folder=folder,
+            resource_type="image",
+            allowed_formats=["jpg", "jpeg", "png", "webp"],
+        )
+    except Exception as error:
+        print(f"[CLOUDINARY UPLOAD ERROR] {type(error).__name__}: {error}")
+        return jsonify({"error": "Image upload failed. Please try again."}), 502
+
+    image_url = result.get("secure_url")
+    if not isinstance(image_url, str):
+        print("[CLOUDINARY UPLOAD ERROR] Response did not include a secure URL.")
+        return jsonify({"error": "Image upload failed. Please try again."}), 502
+    return jsonify({"url": image_url}), 201
+
+
+@app.route("/api/devices/pair-codes", methods=["POST"])
+def create_device_pair_code():
+    user = verify_user_request()
+    if not user:
+        if not os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON"):
+            return jsonify({"error": "Device pairing is not configured on the backend."}), 503
+        return jsonify({"error": "Sign in again before pairing a device."}), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    farm_id = data.get("farmId")
+    field_id = data.get("fieldId")
+    if not isinstance(farm_id, str) or not farm_id or not isinstance(field_id, str) or not field_id:
+        return jsonify({"error": "Select a farm and field before pairing."}), 400
+    if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in farm_id + field_id):
+        return jsonify({"error": "The selected farm or field ID is invalid."}), 400
+
+    try:
+        firestore = admin_firestore.client(app=get_firebase_admin_app())
+        field_ref = firestore.collection("users", user["uid"], "farms", farm_id, "fields", field_id)
+        if not field_ref.get().exists:
+            return jsonify({"error": "The selected field was not found in your account."}), 404
+
+        code = secrets.token_urlsafe(9)
+        firestore.collection("device_pair_codes").document(code).set({
+            "userId": user["uid"],
+            "farmId": farm_id,
+            "fieldId": field_id,
+            "expiresAt": datetime.now(timezone.utc) + timedelta(minutes=10),
+            "createdAt": admin_firestore.SERVER_TIMESTAMP,
+        })
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE PAIRING ERROR] {error}")
+        return jsonify({"error": "Could not create a pairing code. Please try again."}), 503
+    return jsonify({"pairingCode": code, "expiresInSeconds": 600}), 201
+
+
+@app.route("/api/devices/pair", methods=["POST"])
+def pair_device():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    code = data.get("pairingCode")
+    device_id = data.get("deviceId")
+    device_token = data.get("deviceToken")
+    if not isinstance(code, str) or len(code) != 12 or any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+        for character in code
+    ):
+        return jsonify({"error": "A valid 12-character pairing code is required."}), 400
+    if not isinstance(device_id, str) or not isinstance(device_token, str):
+        return jsonify({"error": "The device ID and device credential are required."}), 400
+    device_id = device_id.replace(":", "").replace("-", "").lower()
+    if len(device_id) != 12 or any(character not in "0123456789abcdef" for character in device_id):
+        return jsonify({"error": "The device identifier is invalid."}), 400
+    if len(device_token) < 32 or len(device_token) > 128:
+        return jsonify({"error": "The device credential is invalid."}), 400
+
+    try:
+        firestore = admin_firestore.client(app=get_firebase_admin_app())
+        code_ref = firestore.collection("device_pair_codes").document(code)
+        transaction = firestore.transaction()
+
+        @admin_firestore.transactional
+        def claim_code(transaction):
+            code_snapshot = code_ref.get(transaction=transaction)
+            pairing = code_snapshot.to_dict() if code_snapshot.exists else None
+            if not pairing:
+                return None
+            expires_at = pairing.get("expiresAt")
+            if not expires_at or expires_at <= datetime.now(timezone.utc):
+                transaction.delete(code_ref)
+                return None
+
+            user_id = pairing["userId"]
+            device_ref = firestore.collection("users", user_id, "devices").document(device_id)
+            transaction.set(device_ref, {
+                "deviceId": device_id,
+                "name": f"Irrigation unit {device_id[-4:]}",
+                "farmId": pairing["farmId"],
+                "fieldId": pairing["fieldId"],
+                "mode": "manual",
+                "motorState": "off",
+                "tokenHash": hashlib.sha256(device_token.encode("utf-8")).hexdigest(),
+                "pairedAt": admin_firestore.SERVER_TIMESTAMP,
+                "lastSeenAt": admin_firestore.SERVER_TIMESTAMP,
+            })
+            transaction.set(device_ref.collection("commands").document("current"), {
+                "commandId": secrets.token_hex(8),
+                "mode": "manual",
+                "motor": "off",
+                "updatedAt": admin_firestore.SERVER_TIMESTAMP,
+            })
+            transaction.delete(code_ref)
+            return {"userId": user_id, "deviceId": device_id}
+
+        claimed = claim_code(transaction)
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE PAIRING ERROR] {error}")
+        return jsonify({"error": "Device pairing failed. Please generate a new code."}), 503
+    if not claimed:
+        return jsonify({"error": "Pairing code is invalid or expired. Generate a new code."}), 400
+    return jsonify({"success": True, **claimed}), 201
+
+
+@app.route("/api/devices/command", methods=["GET"])
+def get_device_command():
+    try:
+        admin_app = get_firebase_admin_app()
+    except RuntimeError as error:
+        print(f"[DEVICE CONFIG ERROR] {error}")
+        return jsonify({"error": "Device API is not configured."}), 503
+    verified = verify_device_request(admin_app)
+    if not verified:
+        return jsonify({"error": "Device is not paired or its credential is invalid."}), 401
+    firestore, device_ref, device = verified
+    command_ref = device_ref.collection("commands").document("current")
+    command_snapshot = command_ref.get()
+    command = command_snapshot.to_dict() if command_snapshot.exists else {
+        "commandId": "default",
+        "mode": "manual",
+        "motor": "off",
+    }
+    device_ref.update({"lastSeenAt": admin_firestore.SERVER_TIMESTAMP})
+    return jsonify(command)
+
+
+@app.route("/api/devices/command", methods=["POST"])
+def set_device_command():
+    user = verify_user_request()
+    if not user:
+        if not os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON"):
+            return jsonify({"error": "Device control is not configured on the backend."}), 503
+        return jsonify({"error": "Sign in again to control the device."}), 401
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    device_id = data.get("deviceId")
+    mode = data.get("mode")
+    action = data.get("action")
+    if not isinstance(device_id, str) or len(device_id) != 12:
+        return jsonify({"error": "A valid device ID is required."}), 400
+    if mode not in {"manual", "automatic"}:
+        return jsonify({"error": "Mode must be 'manual' or 'automatic'."}), 400
+    if action not in {"start", "stop", "continue", "mode"}:
+        return jsonify({"error": "Action must be start, stop, continue, or mode."}), 400
+
+    try:
+        firestore = admin_firestore.client(app=get_firebase_admin_app())
+        device_ref = firestore.collection("users", user["uid"], "devices").document(device_id)
+        device_snapshot = device_ref.get()
+        if not device_snapshot.exists:
+            return jsonify({"error": "Device not found in your account."}), 404
+        device = device_snapshot.to_dict() or {}
+        command = {"commandId": secrets.token_hex(8), "mode": mode}
+        if action in {"start", "continue"}:
+            if mode != "manual":
+                return jsonify({"error": "Manual motor runs require manual mode."}), 400
+            duration = data.get("durationMinutes", device.get("lastDurationMinutes", 60))
+            if isinstance(duration, bool) or not isinstance(duration, int) or not 1 <= duration <= 1440:
+                return jsonify({"error": "Manual duration must be from 1 minute to 24 hours."}), 400
+            command.update({"motor": "on", "durationMinutes": duration})
+            device_ref.update({"lastDurationMinutes": duration})
+        elif action == "stop":
+            command["motor"] = "off"
+        else:
+            command["motor"] = "auto" if mode == "automatic" else "off"
+        command["updatedAt"] = admin_firestore.SERVER_TIMESTAMP
+        device_ref.update({"mode": mode})
+        device_ref.collection("commands").document("current").set(command)
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE COMMAND ERROR] {error}")
+        return jsonify({"error": "Could not send the motor command."}), 503
+    return jsonify({"success": True, "commandId": command["commandId"]})
+
+
+@app.route("/api/devices/update", methods=["POST"])
+def update_device():
+    user = verify_user_request()
+    if not user:
+        if not os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON"):
+            return jsonify({"error": "Device management is not configured on the backend."}), 503
+        return jsonify({"error": "Sign in again to update the device."}), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+    device_id = data.get("deviceId")
+    name = data.get("name")
+    farm_id = data.get("farmId")
+    field_id = data.get("fieldId")
+    if not isinstance(device_id, str) or len(device_id) != 12 or any(
+        character not in "0123456789abcdef" for character in device_id.lower()
+    ):
+        return jsonify({"error": "A valid device ID is required."}), 400
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 64:
+        return jsonify({"error": "Device name must be from 1 to 64 characters."}), 400
+    if not isinstance(farm_id, str) or not farm_id or not isinstance(field_id, str) or not field_id or any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+        for character in farm_id + field_id
+    ):
+        return jsonify({"error": "A valid farm and field are required."}), 400
+
+    try:
+        firestore = admin_firestore.client(app=get_firebase_admin_app())
+        device_ref = firestore.collection("users", user["uid"], "devices").document(device_id.lower())
+        device_snapshot = device_ref.get()
+        if not device_snapshot.exists:
+            return jsonify({"error": "Device not found in your account."}), 404
+        device = device_snapshot.to_dict() or {}
+        if device.get("motorState") == "on":
+            return jsonify({"error": "Stop the motor before changing the device assignment."}), 409
+        field_ref = firestore.collection("users", user["uid"], "farms", farm_id, "fields", field_id)
+        if not field_ref.get().exists:
+            return jsonify({"error": "The selected field was not found in your account."}), 404
+        device_ref.update({
+            "name": name.strip(),
+            "farmId": farm_id,
+            "fieldId": field_id,
+            "updatedAt": admin_firestore.SERVER_TIMESTAMP,
+        })
+    except RuntimeError as error:
+        print(f"[DEVICE UPDATE CONFIG ERROR] {error}")
+        return jsonify({"error": "Device management is not configured on the backend."}), 503
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE UPDATE ERROR] {error}")
+        return jsonify({"error": "Could not update the device."}), 503
+    return jsonify({"success": True})
+
+
+@app.route("/api/devices/delete", methods=["POST"])
+def delete_device():
+    user = verify_user_request()
+    if not user:
+        if not os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON"):
+            return jsonify({"error": "Device management is not configured on the backend."}), 503
+        return jsonify({"error": "Sign in again to remove the device."}), 401
+
+    data = request.get_json(silent=True)
+    device_id = data.get("deviceId") if isinstance(data, dict) else None
+    if not isinstance(device_id, str) or len(device_id) != 12 or any(
+        character not in "0123456789abcdef" for character in device_id.lower()
+    ):
+        return jsonify({"error": "A valid device ID is required."}), 400
+
+    try:
+        firestore = admin_firestore.client(app=get_firebase_admin_app())
+        device_ref = firestore.collection("users", user["uid"], "devices").document(device_id.lower())
+        device_snapshot = device_ref.get()
+        if not device_snapshot.exists:
+            return jsonify({"error": "Device not found in your account."}), 404
+        device = device_snapshot.to_dict() or {}
+        if device.get("motorState") == "on":
+            return jsonify({"error": "Stop the motor and wait for its OFF state before removing the device."}), 409
+
+        device_ref.collection("commands").document("current").delete()
+        device_ref.delete()
+    except RuntimeError as error:
+        print(f"[DEVICE DELETE CONFIG ERROR] {error}")
+        return jsonify({"error": "Device management is not configured on the backend."}), 503
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE DELETE ERROR] {error}")
+        return jsonify({"error": "Could not remove the device."}), 503
+    return jsonify({"success": True})
+
+
+@app.route("/api/devices/telemetry", methods=["POST"])
+def receive_device_telemetry():
+    try:
+        admin_app = get_firebase_admin_app()
+    except RuntimeError as error:
+        print(f"[DEVICE CONFIG ERROR] {error}")
+        return jsonify({"error": "Device API is not configured."}), 503
+    verified = verify_device_request(admin_app)
+    if not verified:
+        return jsonify({"error": "Device is not paired or its credential is invalid."}), 401
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+
+    numeric_ranges = {
+        "n": (0, 10000), "p": (0, 10000), "k": (0, 10000),
+        "temperature": (-40, 85), "humidity": (0, 100), "moisture": (0, 100),
+    }
+    reading = {}
+    for key, (minimum, maximum) in numeric_ranges.items():
+        value = data.get(key)
+        if isinstance(value, bool):
+            return jsonify({"error": f"{key} must be a number."}), 400
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return jsonify({"error": f"{key} must be a number."}), 400
+            if not np.isfinite(value) or not minimum <= value <= maximum:
+                return jsonify({"error": f"{key} is outside its allowed range."}), 400
+            reading[key] = value
+    if "moisture" not in reading:
+        return jsonify({"error": "moisture is required."}), 400
+    if data.get("ldr") not in {"day", "night"}:
+        return jsonify({"error": "ldr must be 'day' or 'night'."}), 400
+    if data.get("motor") not in {"on", "off"}:
+        return jsonify({"error": "motor must be 'on' or 'off'."}), 400
+    if data.get("mode") not in {"manual", "automatic"}:
+        return jsonify({"error": "mode must be 'manual' or 'automatic'."}), 400
+    reading.update({
+        "ldr": data["ldr"],
+        "motor": data["motor"],
+        "mode": data["mode"],
+        "source": "Irrigation device",
+        "recordedAt": admin_firestore.SERVER_TIMESTAMP,
+    })
+    event = data.get("event")
+    if event not in {None, "manual_timer_expired"}:
+        return jsonify({"error": "Unsupported telemetry event."}), 400
+
+    firestore, device_ref, device = verified
+    user_ref = device_ref.parent.parent
+    user_id = user_ref.id
+    farm_id = device.get("farmId")
+    field_id = device.get("fieldId")
+    if not farm_id or not field_id:
+        return jsonify({"error": "Device has no assigned farm field."}), 409
+    field_ref = firestore.collection("users", user_id, "farms", farm_id, "fields", field_id)
+    field_snapshot = field_ref.get()
+    if not field_snapshot.exists:
+        return jsonify({"error": "The assigned field no longer exists."}), 409
+
+    try:
+        field_ref.collection("readings").add(reading)
+        moisture_band = "low" if reading["moisture"] < 30 else "high" if reading["moisture"] >= 60 else "normal"
+        previous_band = device.get("moistureBand")
+        patch = {
+            "lastSeenAt": admin_firestore.SERVER_TIMESTAMP,
+            "motorState": reading["motor"],
+            "mode": reading["mode"],
+            "latestReading": {**reading, "recordedAt": admin_firestore.SERVER_TIMESTAMP},
+            "moistureBand": moisture_band,
+        }
+        device_ref.update(patch)
+
+        if event == "manual_timer_expired":
+            send_user_pushes(
+                firestore, user_id, "Manual watering timer ended",
+                "The motor was stopped. Open AgroSmart to continue for the previous duration or leave it stopped.",
+                {"type": "manual_timer_expired", "deviceId": device_ref.id, "url": "/irrigation"},
+            )
+        elif moisture_band != previous_band and moisture_band in {"low", "high"}:
+            if moisture_band == "low":
+                body = "Soil moisture is below 30%. Start the motor manually or review automatic mode."
+            elif reading["mode"] == "automatic":
+                body = "Soil moisture reached 60%. Automatic mode should stop the motor."
+            else:
+                body = "Soil moisture is above 60%. Consider stopping the motor."
+            send_user_pushes(
+                firestore, user_id, "Soil moisture alert", body,
+                {"type": f"moisture_{moisture_band}", "deviceId": device_ref.id, "url": "/irrigation"},
+            )
+    except firebase_admin.exceptions.FirebaseError as error:
+        print(f"[DEVICE TELEMETRY ERROR] {error}")
+        return jsonify({"error": "Could not save device telemetry."}), 503
+    return jsonify({"success": True}), 201
 
 
 @app.route("/api/tts/kannada", methods=["POST"])
@@ -1565,6 +2089,6 @@ if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=True
+        port=int(os.environ.get("PORT", "5000")),
+        debug=False
     )
