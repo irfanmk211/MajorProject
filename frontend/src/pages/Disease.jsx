@@ -27,6 +27,7 @@ import {
 } from "../data/diseaseInfo";
 import { getCropImagePlaceholder } from "../data/cropImages";
 import { useLanguage } from "../context/languageState";
+import { API_BASE_URL } from "../config";
 
 export default function Disease() {
   const { t } = useLanguage();
@@ -62,16 +63,29 @@ const handleUpload = async () => {
   formData.append("image", file);
 
   try {
-    const res = await fetch("http://127.0.0.1:5000/api/predict", {
+    const res = await fetch(`${API_BASE_URL}/api/predict`, {
       method: "POST",
       body: formData,
     });
 
-    const data = await res.json();
+    const responseText = await res.text();
+    let data = null;
+    try {
+      data = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      data = null;
+    }
 
     console.log("Backend response:", data);
 
-    if (res.ok && data.success) {
+    if (!res.ok) {
+      const errorMessage = data?.error || (
+        res.status === 503
+          ? "Disease prediction service is temporarily unavailable. Please try again later."
+          : `Disease prediction service returned HTTP ${res.status}.`
+      );
+      alert(t(errorMessage));
+    } else if (data?.success) {
       const transformedResult = {
         label: data.prediction.label,
         confidence: data.prediction.confidence,
@@ -85,7 +99,7 @@ const handleUpload = async () => {
     }
   } catch (err) {
     console.error("Prediction error:", err);
-    alert(t("Backend error. Ensure Flask server is running on port 5000."));
+    alert(t("Could not connect to the disease prediction service. Check your connection and try again."));
   } finally {
     setLoading(false);
   }
