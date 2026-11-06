@@ -33,6 +33,10 @@ except ImportError:
 # TENSORFLOW
 # ============================================================
 
+os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
+os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 try:
     import tensorflow as tf
     from tensorflow.keras.models import load_model
@@ -1712,12 +1716,10 @@ def predict_disease():
             )
 
 
-            predictions = (
-                disease_model.predict(
-                    img_batch,
-                    verbose=0
-                )[0]
-            )
+            predictions = disease_model(
+                img_batch,
+                training=False
+            ).numpy()[0]
 
 
             print(
