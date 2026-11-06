@@ -1,20 +1,28 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
-env/
-.venv/
-temp_disease_image.jpg
-
-# Node / Frontend
 node_modules/
 dist/
+backend/__pycache__/
+*.pyc
+*.keras
+*.h5
+*.pkl
+*.joblib
+temp.jpg
 .env
-.env.local
-.DS_Store
 
-# IDE / System
+# Python environment and cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editor files
 .vscode/
-.idea/
-*.log
+
+# Training logs
+backend/logs_finetune/
+backend/logs_head/

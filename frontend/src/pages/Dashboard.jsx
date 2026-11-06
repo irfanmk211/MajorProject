@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Sprout,
@@ -8,11 +8,15 @@ import {
   CloudSun,
   Database,
   ArrowRight,
+  Pencil,
+  Tractor,
 } from "lucide-react";
 
 import GlassCard from "../components/ui/GlassCard";
 import RippleButton from "../components/ui/RippleButton";
 import PageTransition from "../components/ui/PageTransition";
+import { useLanguage } from "../context/languageState";
+import { useAuth } from "../context/AuthContext";
 
 const modules = [
   {
@@ -61,9 +65,17 @@ const modules = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { t } = useLanguage();
+  const { user } = useAuth();
 
   return (
     <PageTransition className="mx-auto max-w-7xl space-y-8">
+      {location.state?.profileSaved && (
+        <div role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 font-semibold text-emerald-800">
+          {t("Farmer profile saved successfully. Welcome to AgroSmart!")}
+        </div>
+      )}
       {/* Hero Section */}
       <motion.section
         initial={{ opacity: 0, scale: 0.98 }}
@@ -99,16 +111,16 @@ export default function Dashboard() {
             animate={{ opacity: 1, x: 0 }}
             className="text-3xl md:text-4xl font-extrabold text-white leading-tight"
           >
-            Smart Agriculture Decision Support
+            {t("Smart Agriculture Decision Support")}
           </motion.h1>
 
           <p className="mt-4 text-lg text-white/80">
-            ML-based crop recommendation and plant disease detection system.
+            {user?.name ? `${t("Welcome,")} ${t(user.name)}. ` : ""}{t("ML-based crop recommendation and plant disease detection system.")}
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <RippleButton onClick={() => navigate("/crop")}>
-              Crop Recommendation
+              {t("Crop Recommendation")}
               <ArrowRight size={18} className="ml-1 inline" />
             </RippleButton>
 
@@ -116,8 +128,22 @@ export default function Dashboard() {
               variant="secondary"
               onClick={() => navigate("/disease")}
             >
-              Disease Detection
+              {t("Disease Detection")}
             </RippleButton>
+            <button
+              type="button"
+              onClick={() => navigate("/profile-setup?edit=1")}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-3 font-semibold text-white transition hover:bg-white/20"
+            >
+              <Pencil size={17} /> {t("Edit farmer profile")}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/farms")}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-3 font-semibold text-white transition hover:bg-white/20"
+            >
+              <Tractor size={17} /> {t("Farms & Fields")}
+            </button>
           </div>
         </div>
       </motion.section>
@@ -125,7 +151,7 @@ export default function Dashboard() {
       {/* Platform Modules */}
       <div>
         <h3 className="mb-4 text-xl font-bold text-slate-800 dark:text-white">
-          Platform Modules
+          {t("Platform Modules")}
         </h3>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -143,11 +169,11 @@ export default function Dashboard() {
               </div>
 
               <h4 className="text-lg font-bold text-slate-800 dark:text-white group-hover:text-agri-600 transition-colors">
-                {module.title}
+                {t(module.title)}
               </h4>
 
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                {module.desc}
+                {t(module.desc)}
               </p>
             </GlassCard>
           ))}

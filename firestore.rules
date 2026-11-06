@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false;
+
+      match /farms/{farmId} {
+        allow read, create, update, delete: if isOwner(userId);
+
+        match /fields/{fieldId} {
+          allow read, create, update, delete: if isOwner(userId);
+
+          match /readings/{readingId} {
+            allow read: if isOwner(userId);
+            allow create: if isOwner(userId)
+              && request.resource.data.keys().hasOnly([
+                'temperature', 'humidity', 'soil', 'soil_moisture_percent',
+                'ldr', 'irrigation', 'pump_state', 'source', 'recordedAt'
+              ])
+              && request.resource.data.recordedAt == request.time;
+            allow update, delete: if false;
+          }
+        }
+      }
+    }
+  }
+}

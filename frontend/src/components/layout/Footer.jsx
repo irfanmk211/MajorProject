@@ -1,10 +1,15 @@
 import { Link } from "react-router-dom";
 import { Leaf, Code, Mail, Phone } from "lucide-react";
+import { useLanguage } from "../../context/languageState";
 
-export default function Footer() {
+export default function Footer({ sidebarWidth = 260 }) {
+  const { t } = useLanguage();
   return (
-    <footer className="border-t border-slate-200/60 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50 mt-auto">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
+    <footer
+      style={{ marginLeft: sidebarWidth }}
+      className="border-t border-slate-200/50 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50"
+    >
+      <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="grid gap-8 md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -14,18 +19,18 @@ export default function Footer() {
               <span className="font-bold text-slate-800 dark:text-white">AgroSmart</span>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              AI-powered smart agriculture platform for crop recommendation, disease detection, and farm management.
+              {t("AI-powered smart agriculture platform for crop recommendation, disease detection, and farm management.")}
             </p>
           </div>
 
           <div>
-            <h4 className="font-semibold text-slate-800 dark:text-white mb-4">Quick Links</h4>
+            <h4 className="font-semibold text-slate-800 dark:text-white mb-4">{t("Quick Links")}</h4>
             <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
               {[
-                ["/dashboard", "Dashboard"],
-                ["/crop", "Crop Recommendation"],
-                ["/disease", "Disease Detection"],
-                ["/about", "About"],
+                ["/dashboard", t("Dashboard")],
+                ["/crop", t("Crop Recommendation")],
+                ["/disease", t("Disease Detection")],
+                ["/about", t("About")],
               ].map(([to, label]) => (
                 <li key={to}>
                   <Link to={to} className="hover:text-agri-500 transition-colors">{label}</Link>
@@ -37,7 +42,7 @@ export default function Footer() {
           
 
           <div>
-            <h4 className="font-semibold text-slate-800 dark:text-white mb-4">Contact</h4>
+            <h4 className="font-semibold text-slate-800 dark:text-white mb-4">{t("Contact")}</h4>
             <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
               <li className="flex items-center gap-2"><Mail size={14} /> support@agrosmart.ai</li>
               <li className="flex items-center gap-2"><Phone size={14} /> +91 98765 43210</li>
@@ -47,7 +52,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-10 border-t border-slate-200/50 dark:border-white/10 pt-6 text-center text-sm text-slate-400">
-          © {new Date().getFullYear()} AgroSmart AI. All rights reserved.
+          © {new Date().getFullYear()} AgroSmart AI. {t("All rights reserved.")}
         </div>
       </div>
     </footer>

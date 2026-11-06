@@ -19,6 +19,7 @@ import GlassCard from "../components/ui/GlassCard";
 import PageTransition from "../components/ui/PageTransition";
 import { useAuth } from "../context/AuthContext";
 import { ESP32_IP } from "../config";
+import { useLanguage } from "../context/languageState";
 
 const LOCATIONS = {
   "Karnataka, India": { latitude: 12.9716, longitude: 77.5946 },
@@ -48,6 +49,7 @@ function pickIcon(code) {
 
 export default function Weather() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const locationLabel = user?.location || "Karnataka, India";
   const coords = LOCATIONS[locationLabel] || LOCATIONS["Karnataka, India"];
 
@@ -142,7 +144,7 @@ export default function Weather() {
       <PageTransition className="mx-auto max-w-7xl flex min-h-[40vh] items-center justify-center">
         <div className="flex items-center gap-3 text-slate-500">
           <Loader2 className="animate-spin" size={28} />
-          Loading forecast for {locationLabel}...
+          {t("Loading forecast for")} {t(locationLabel)}...
         </div>
       </PageTransition>
     );
@@ -154,7 +156,7 @@ export default function Weather() {
         <GlassCard hover={false}>
           <div className="flex items-center gap-3 text-red-600">
             <AlertTriangle size={24} />
-            <p>{error || "Unable to load weather data."}</p>
+            <p>{t(error || "Unable to load weather data.")}</p>
           </div>
         </GlassCard>
       </PageTransition>
@@ -175,7 +177,7 @@ export default function Weather() {
   ];
 
   const forecast = daily.time.map((date, i) => ({
-    day: dayNames[new Date(date).getDay()],
+    day: t(dayNames[new Date(date).getDay()]),
     high: Math.round(daily.temperature_2m_max[i]),
     low: Math.round(daily.temperature_2m_min[i]),
     rain: daily.precipitation_probability_max[i],
@@ -200,16 +202,16 @@ export default function Weather() {
           </div>
           <div className="relative z-10 flex flex-col justify-between h-full min-h-[160px]">
             <div>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Regional Weather Forecast</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("Regional Weather Forecast")}</p>
               <h2 className="mt-2 text-5xl font-extrabold text-slate-800 dark:text-white">
                 {Math.round(current.temperature_2m)}°C
               </h2>
             </div>
             <div>
               <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-                Data sources: Open-Meteo APIs
+                {t("Data sources: Open-Meteo APIs")}
               </p>
-              <p className="text-xs text-slate-400 mt-1">Location: {locationLabel}</p>
+              <p className="text-xs text-slate-400 mt-1">{t("Location:")} {t(locationLabel)}</p>
             </div>
           </div>
         </GlassCard>
@@ -237,7 +239,7 @@ export default function Weather() {
                   <span className={`relative inline-flex rounded-full h-2 w-2 ${localError ? "bg-red-500" : "bg-emerald-500"}`}></span>
                 </span>
                 <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <Wifi size={14} /> Live Local IoT Station
+                  <Wifi size={14} /> {t("Live Local IoT Station")}
                 </p>
               </div>
 
@@ -249,25 +251,25 @@ export default function Weather() {
             <div>
               <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-slate-400 block text-xs">Station Humidity</span>
+                  <span className="text-slate-400 block text-xs">{t("Station Humidity")}</span>
                   <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1">
                     <Droplets size={14} className="text-sky-500" />
                     {localHasData ? `${localReadings.humidity}%` : "—"}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-xs">Light level</span>
+                  <span className="text-slate-400 block text-xs">{t("Light level")}</span>
                   <span className="font-bold text-slate-800 dark:text-white">
-                    {localHasData ? (localReadings.ldr_state === 0 ? "☀️ Daylight" : "🌙 Night") : "—"}
+                    {localHasData ? (localReadings.ldr_state === 0 ? `☀️ ${t("Daylight")}` : `🌙 ${t("Night")}`) : "—"}
                   </span>
                 </div>
               </div>
               {localError && (
                 <p className="text-red-500 text-xs mt-2 font-semibold">
-                  ESP32 Station Offline
+                  {t("ESP32 Station Offline")}
                 </p>
               )}
-              <p className="text-xs text-slate-400 mt-1">Station IP: {ESP32_IP}</p>
+              <p className="text-xs text-slate-400 mt-1">{t("Station IP:")} {ESP32_IP}</p>
             </div>
           </div>
         </GlassCard>
@@ -280,7 +282,7 @@ export default function Weather() {
             <div className="flex items-center gap-3">
               <m.icon className={m.color} size={28} />
               <div>
-                <p className="text-sm text-slate-500">{m.label}</p>
+                <p className="text-sm text-slate-500">{t(m.label)}</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-white">{m.value}</p>
               </div>
             </div>
@@ -290,7 +292,7 @@ export default function Weather() {
 
       {/* 7-Day Forecast */}
       <div>
-        <h3 className="mb-4 text-xl font-bold text-slate-800 dark:text-white">7-Day Forecast</h3>
+        <h3 className="mb-4 text-xl font-bold text-slate-800 dark:text-white">{t("7-Day Forecast")}</h3>
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
           {forecast.map((day, i) => (
             <GlassCard key={`${day.day}-${i}`} delay={i * 0.05}>
@@ -306,7 +308,7 @@ export default function Weather() {
                 <span className="font-bold text-slate-800 dark:text-white">{day.high}°</span>
                 <span className="text-slate-400 ml-1">{day.low}°</span>
               </div>
-              <p className="mt-1 text-center text-xs text-sky-500">{day.rain}% rain</p>
+              <p className="mt-1 text-center text-xs text-sky-500">{day.rain}% {t("rain")}</p>
             </GlassCard>
           ))}
         </div>

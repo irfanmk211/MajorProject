@@ -1,100 +1,112 @@
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import json
+import base64
+import binascii
 import numpy as np
 import pandas as pd
 import pickle
-import gc
-from flask import Flask, request, jsonify
+import urllib.error
+import urllib.request
+from urllib.parse import quote
+
+from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
+from PIL import Image
 
-# Optional imports for Disease Recognition Model handled lazily below
+try:
+    from dotenv import load_dotenv
 
-# Initialize Flask App
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
+
+# ============================================================
+# TENSORFLOW
+# ============================================================
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import load_model
+except ImportError as e:
+    print(f"[TENSORFLOW ERROR] {e}")
+    tf = None
+    load_model = None
+
+
+# ============================================================
+# FLASK APP
+# ============================================================
+
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
+CORS(app)
 
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        res = jsonify({"status": "preflight_ok"})
-        res.headers["Access-Control-Allow-Origin"] = "*"
-        res.headers["Access-Control-Allow-Headers"] = "*"
-        res.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
-        return res, 200
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
-    return response
+# ============================================================
+# BASE DIRECTORY
+# ============================================================
 
-def make_cors_response(data, status_code=200):
-    res = jsonify(data)
-    res.headers["Access-Control-Allow-Origin"] = "*"
-    res.headers["Access-Control-Allow-Headers"] = "*"
-    res.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
-    return res, status_code
-
-@app.errorhandler(400)
-def bad_request(e):
-    return make_cors_response({"error": "Bad request", "details": str(e), "success": False}, 400)
-
-@app.errorhandler(404)
-def not_found(e):
-    return make_cors_response({"error": "Endpoint not found", "success": False}, 404)
-
-@app.errorhandler(405)
-def method_not_allowed(e):
-    return make_cors_response({"error": "Method not allowed", "success": False}, 405)
-
-@app.errorhandler(500)
-def server_error(e):
-    return make_cors_response({"error": "Internal server error", "details": str(e), "success": False}, 500)
-
-@app.errorhandler(Exception)
-def handle_exception(e):
-    return make_cors_response({"error": "Unhandled server exception", "details": str(e), "success": False}, 500)
-
-# Base Paths & Serialized Models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
-MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
-# Crop Recommendation Model Path (defaults to local backend/ directory for Render deployment)
-CROP_MODEL_PATH = os.path.join(BASE_DIR, "crop_model.pkl")
+
+# ============================================================
+# CROP RECOMMENDATION MODEL
+# ============================================================
+
+# Change this path if your crop model is stored somewhere else.
+DATATRAIN_DIR = r"C:\Users\Irfan\OneDrive\Documents\Datatrain"
+
+CROP_MODEL_PATH = os.path.join(
+    DATATRAIN_DIR,
+    "crop_model.pkl"
+)
+
+# If the above path does not exist,
+# search inside the backend folder.
 if not os.path.exists(CROP_MODEL_PATH):
-    CROP_MODEL_PATH = os.path.join(MODELS_DIR, "crop_model.pkl")
 
-# Plant Disease Recognition Model Paths (TFLite preferred for fast 20ms low-RAM execution)
-DISEASE_TFLITE_PATH = os.path.join(BASE_DIR, "plant_disease_model.tflite")
-if not os.path.exists(DISEASE_TFLITE_PATH):
-    DISEASE_TFLITE_PATH = os.path.join(MODELS_DIR, "plant_disease_model.tflite")
+    CROP_MODEL_PATH = os.path.join(
+        BASE_DIR,
+        "crop_model.pkl"
+    )
 
-DISEASE_MODEL_PATH = os.path.join(BASE_DIR, "plant_disease_model.keras")
-if not os.path.exists(DISEASE_MODEL_PATH):
-    DISEASE_MODEL_PATH = os.path.join(MODELS_DIR, "plant_disease_model.keras")
 
-# Open-Source ImageNet Pre-Trained Gatekeeper Model (Detects Plants vs Animals/Humans/Objects)
-GATEKEEPER_TFLITE_PATH = os.path.join(BASE_DIR, "plant_gatekeeper.tflite")
-if not os.path.exists(GATEKEEPER_TFLITE_PATH):
-    GATEKEEPER_TFLITE_PATH = os.path.join(MODELS_DIR, "plant_gatekeeper.tflite")
+# ============================================================
+# DISEASE MODEL
+# ============================================================
 
-IMAGENET_CLASSES_PATH = os.path.join(BASE_DIR, "imagenet_classes.json")
-if not os.path.exists(IMAGENET_CLASSES_PATH):
-    IMAGENET_CLASSES_PATH = os.path.join(MODELS_DIR, "imagenet_classes.json")
+DISEASE_MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "plant_disease_model.keras"
+)
 
-CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
-if not os.path.exists(CLASS_NAMES_PATH):
-    CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.txt")
-if not os.path.exists(CLASS_NAMES_PATH):
-    CLASS_NAMES_PATH = os.path.join(MODELS_DIR, "class_names.json")
-if not os.path.exists(CLASS_NAMES_PATH):
-    CLASS_NAMES_PATH = os.path.join(MODELS_DIR, "class_names.txt")
+CLASS_NAMES_PATH = os.path.join(
+    BASE_DIR,
+    "class_names.json"
+)
 
-# Global Sensor Data Storage (IoT Telemetry)
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+IMG_SIZE = 224
+
+CONFIDENCE_THRESHOLD = 0.60
+
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+ALLOWED_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "png",
+    "webp"
+}
+
+
+# ============================================================
+# SENSOR DATA
+# ============================================================
+
 sensor_data = {
     "temperature": 0,
     "humidity": 0,
@@ -103,600 +115,1456 @@ sensor_data = {
     "irrigation": "OFF"
 }
 
-# =====================================================================
-# 1. CROP RECOMMENDATION MODEL (NEW MODEL FROM DATATRAIN)
-# =====================================================================
-print(f"[CROP MODEL] Loading model from: {CROP_MODEL_PATH}")
-with open(CROP_MODEL_PATH, "rb") as f:
-    crop_model_data = pickle.load(f)
 
-crop_rf_model = crop_model_data["model"]
-crop_label_encoder = crop_model_data["label_encoder"]
-crop_features = crop_model_data["features"]
-print(f"[CROP MODEL] Loaded successfully with {len(crop_label_encoder.classes_)} classes.")
+# ============================================================
+# CROP MODEL UNPICKLER
+# ============================================================
 
-# =====================================================================
-# 2. DISEASE & GATEKEEPER PREDICTION MODELS
-# =====================================================================
+class NumpyCompatibleUnpickler(pickle.Unpickler):
+
+    def find_class(self, module, name):
+
+        if module.startswith("numpy._core"):
+
+            module = module.replace(
+                "numpy._core",
+                "numpy.core",
+                1
+            )
+
+        return super().find_class(
+            module,
+            name
+        )
+
+
+# ============================================================
+# LOAD CROP MODEL
+# ============================================================
+
+crop_rf_model = None
+crop_label_encoder = None
+crop_features = []
+
+
+print()
+print("=" * 60)
+print("Loading Crop Recommendation Model")
+print("=" * 60)
+
+print(
+    f"[CROP MODEL] Path: {CROP_MODEL_PATH}"
+)
+
+
+try:
+
+    if os.path.exists(CROP_MODEL_PATH):
+
+        with open(
+            CROP_MODEL_PATH,
+            "rb"
+        ) as f:
+
+            crop_model_data = (
+                NumpyCompatibleUnpickler(f).load()
+            )
+
+        crop_rf_model = (
+            crop_model_data["model"]
+        )
+
+        crop_label_encoder = (
+            crop_model_data["label_encoder"]
+        )
+
+        crop_features = (
+            crop_model_data["features"]
+        )
+
+        print(
+            "[CROP MODEL] Loaded successfully"
+        )
+
+        print(
+            f"[CROP MODEL] Classes: "
+            f"{len(crop_label_encoder.classes_)}"
+        )
+
+    else:
+
+        print(
+            "[CROP MODEL] File not found."
+        )
+
+        print(
+            "[CROP MODEL] Crop prediction "
+            "will be unavailable."
+        )
+
+except Exception as e:
+
+    print(
+        f"[CROP MODEL] Error loading model: {e}"
+    )
+
+    crop_rf_model = None
+    crop_label_encoder = None
+    crop_features = []
+
+
+# ============================================================
+# LOAD DISEASE MODEL
+# ============================================================
+
 disease_model = None
-tflite_interpreter = None
-tflite_input_details = None
-tflite_output_details = None
 disease_class_names = []
 
-gatekeeper_interpreter = None
-gatekeeper_input_details = None
-gatekeeper_output_details = None
-imagenet_class_names = []
 
-# Load Disease Class Names & Agronomic Information Database
-disease_info_db = {}
-DISEASE_INFO_PATH = os.path.join(BASE_DIR, "disease_info.json")
-if os.path.exists(DISEASE_INFO_PATH):
-    with open(DISEASE_INFO_PATH, "r", encoding="utf-8") as f:
-        disease_info_db = json.load(f)
-    print(f"[DISEASE MODEL] Loaded {len(disease_info_db)} disease advisory records.")
+print()
+print("=" * 60)
+print("Loading Plant Disease Model")
+print("=" * 60)
 
-if os.path.exists(CLASS_NAMES_PATH):
-    with open(CLASS_NAMES_PATH, "r", encoding="utf-8") as f:
-        if CLASS_NAMES_PATH.endswith(".json"):
+print(
+    f"[DISEASE MODEL] Model path:"
+)
+print(
+    DISEASE_MODEL_PATH
+)
+
+print(
+    f"[DISEASE MODEL] Classes path:"
+)
+print(
+    CLASS_NAMES_PATH
+)
+
+
+if (
+    load_model is not None
+    and os.path.exists(DISEASE_MODEL_PATH)
+    and os.path.exists(CLASS_NAMES_PATH)
+):
+
+    try:
+
+        print(
+            "[DISEASE MODEL] Loading model..."
+        )
+
+        disease_model = load_model(
+            DISEASE_MODEL_PATH
+        )
+
+        print(
+            "[DISEASE MODEL] Model loaded successfully."
+        )
+
+        # ----------------------------------------------------
+        # Load class names
+        # ----------------------------------------------------
+
+        with open(
+            CLASS_NAMES_PATH,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
             disease_class_names = json.load(f)
-        else:
-            disease_class_names = [line.strip() for line in f if line.strip()]
-    print(f"[DISEASE MODEL] Loaded {len(disease_class_names)} class names from {CLASS_NAMES_PATH}.")
 
-# Load ImageNet Classes for Gatekeeper
-if os.path.exists(IMAGENET_CLASSES_PATH):
-    with open(IMAGENET_CLASSES_PATH, "r", encoding="utf-8") as f:
-        imagenet_class_names = json.load(f)
-    print(f"[GATEKEEPER] Loaded {len(imagenet_class_names)} ImageNet class names.")
+        print(
+            "[DISEASE MODEL] Loaded "
+            f"{len(disease_class_names)} classes."
+        )
 
-# Initialize Open-Source Gatekeeper TFLite Model
-if os.path.exists(GATEKEEPER_TFLITE_PATH):
-    try:
-        try:
-            import ai_edge_litert.interpreter as tflite
-        except ImportError:
-            import tflite_runtime.interpreter as tflite
-        gatekeeper_interpreter = tflite.Interpreter(model_path=GATEKEEPER_TFLITE_PATH)
-        gatekeeper_interpreter.allocate_tensors()
-        gatekeeper_input_details = gatekeeper_interpreter.get_input_details()
-        gatekeeper_output_details = gatekeeper_interpreter.get_output_details()
-        print(f"[GATEKEEPER] Loaded pre-trained ImageNet model from: {GATEKEEPER_TFLITE_PATH}")
-    except Exception as e_gk:
-        try:
-            import tensorflow as tf
-            gatekeeper_interpreter = tf.lite.Interpreter(model_path=GATEKEEPER_TFLITE_PATH)
-            gatekeeper_interpreter.allocate_tensors()
-            gatekeeper_input_details = gatekeeper_interpreter.get_input_details()
-            gatekeeper_output_details = gatekeeper_interpreter.get_output_details()
-            print(f"[GATEKEEPER] Loaded pre-trained ImageNet model via tf.lite from: {GATEKEEPER_TFLITE_PATH}")
-        except Exception as e_gk2:
-            print(f"[GATEKEEPER] Could not load gatekeeper model: {e_gk} / {e_gk2}")
+        print(
+            "[DISEASE MODEL] Classes:"
+        )
 
-# Initialize Plant Disease TFLite Model via ultra-lightweight runtime (<15MB RAM)
-if os.path.exists(DISEASE_TFLITE_PATH):
-    try:
-        try:
-            import ai_edge_litert.interpreter as tflite
-        except ImportError:
-            import tflite_runtime.interpreter as tflite
-        tflite_interpreter = tflite.Interpreter(model_path=DISEASE_TFLITE_PATH)
-        tflite_interpreter.allocate_tensors()
-        tflite_input_details = tflite_interpreter.get_input_details()
-        tflite_output_details = tflite_interpreter.get_output_details()
-        print(f"[DISEASE MODEL] Loaded optimized TFLite model via litert/tflite_runtime from: {DISEASE_TFLITE_PATH}")
-    except Exception as e_litert:
-        try:
-            import tensorflow as tf
-            tflite_interpreter = tf.lite.Interpreter(model_path=DISEASE_TFLITE_PATH)
-            tflite_interpreter.allocate_tensors()
-            tflite_input_details = tflite_interpreter.get_input_details()
-            tflite_output_details = tflite_interpreter.get_output_details()
-            print(f"[DISEASE MODEL] Loaded optimized TFLite model via tf.lite from: {DISEASE_TFLITE_PATH}")
-        except Exception as e_tf:
-            print(f"[DISEASE MODEL] Could not initialize TFLite model: {e_litert} / {e_tf}")
+        for i, class_name in enumerate(
+            disease_class_names
+        ):
 
-# Fallback to Keras model only if TFLite not available
-if tflite_interpreter is None and os.path.exists(DISEASE_MODEL_PATH):
-    try:
-        import tensorflow as tf
-        disease_model = tf.keras.models.load_model(DISEASE_MODEL_PATH)
-        print(f"[DISEASE MODEL] Loaded Keras model from: {DISEASE_MODEL_PATH}")
+            print(
+                f"  {i}: {class_name}"
+            )
+
+        # ----------------------------------------------------
+        # Verify model output
+        # ----------------------------------------------------
+
+        try:
+
+            output_shape = (
+                disease_model.output_shape
+            )
+
+            print(
+                f"[DISEASE MODEL] Output shape: "
+                f"{output_shape}"
+            )
+
+        except Exception:
+            pass
+
     except Exception as e:
-        print(f"[DISEASE MODEL] Could not initialize Keras model: {e}")
+
+        print(
+            "[DISEASE MODEL] "
+            f"Could not load model: {e}"
+        )
+
+        disease_model = None
+        disease_class_names = []
+
+else:
+
+    print(
+        "[DISEASE MODEL] Model or "
+        "class_names.json not found."
+    )
+
+    print(
+        f"Expected model: "
+        f"{DISEASE_MODEL_PATH}"
+    )
+
+    print(
+        f"Expected classes: "
+        f"{CLASS_NAMES_PATH}"
+    )
 
 
-# =====================================================================
-# 3. ROUTES & ENDPOINTS
-# =====================================================================
+# ============================================================
+# ALLOWED FILE CHECK
+# ============================================================
 
-@app.route("/", methods=["GET", "OPTIONS"])
-@app.route("/health", methods=["GET", "OPTIONS"])
-def health():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+def allowed_file(filename):
+
+    if not filename:
+        return False
+
+    if "." not in filename:
+        return False
+
+    extension = filename.rsplit(
+        ".",
+        1
+    )[1].lower()
+
+    return extension in ALLOWED_EXTENSIONS
+
+
+# ============================================================
+# PARSE DISEASE LABEL
+# ============================================================
+
+def parse_label(label_str):
+
+    """
+    Converts labels such as:
+
+        Tomato_EarlyBlight
+        Tomato_Healthy
+        BlackPepper_PolluDisease
+        Rice___Bacterial_leaf_blight
+
+    into:
+
+        plant
+        disease
+        original label
+    """
+
+    try:
+
+        # ----------------------------------------------------
+        # Format:
+        # Plant___Disease
+        # ----------------------------------------------------
+
+        if "___" in label_str:
+
+            parts = label_str.split(
+                "___",
+                1
+            )
+
+            plant = (
+                parts[0]
+                .replace("_", " ")
+                .strip()
+            )
+
+            if len(parts) > 1:
+
+                disease = (
+                    parts[1]
+                    .replace("_", " ")
+                    .strip()
+                )
+
+            else:
+
+                disease = "Unknown"
+
+        # ----------------------------------------------------
+        # Format:
+        # Plant_Disease
+        # ----------------------------------------------------
+
+        else:
+
+            parts = label_str.split("_")
+
+            if len(parts) >= 2:
+
+                plant = parts[0].strip()
+
+                disease = " ".join(
+                    parts[1:]
+                ).strip()
+
+            else:
+
+                plant = "Unknown"
+
+                disease = (
+                    label_str
+                    .replace("_", " ")
+                    .strip()
+                )
+
+        return (
+            plant,
+            disease,
+            label_str
+        )
+
+    except Exception as e:
+
+        print(
+            f"[LABEL ERROR] {e}"
+        )
+
+        return (
+            "Unknown",
+            "Unknown",
+            label_str
+        )
+
+
+# ============================================================
+# IMAGE PREPROCESSING
+# ============================================================
+
+def preprocess_image(image_path):
+
+    """
+    Prepare image for the trained MobileNetV2 model.
+
+    IMPORTANT:
+    The trained model already contains its own
+    MobileNetV2 preprocessing layer.
+
+    Therefore:
+        DO NOT use preprocess_input() here.
+
+    Input:
+        Original RGB image
+
+    Output:
+        (1, 224, 224, 3)
+
+    Values:
+        0 - 255
+    """
+
+    try:
+
+        print()
+        print(
+            "[IMAGE] Opening image:"
+        )
+
+        print(
+            image_path
+        )
+
+        # ----------------------------------------------------
+        # Verify file exists
+        # ----------------------------------------------------
+
+        if not os.path.exists(image_path):
+
+            print(
+                "[IMAGE] File does not exist."
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Open image
+        # ----------------------------------------------------
+
+        img = Image.open(
+            image_path
+        )
+
+        print(
+            f"[IMAGE] Original size: "
+            f"{img.size}"
+        )
+
+        print(
+            f"[IMAGE] Original mode: "
+            f"{img.mode}"
+        )
+
+        # ----------------------------------------------------
+        # Convert to RGB
+        # ----------------------------------------------------
+
+        img = img.convert(
+            "RGB"
+        )
+
+        # ----------------------------------------------------
+        # Resize
+        # ----------------------------------------------------
+
+        img = img.resize(
+            (
+                IMG_SIZE,
+                IMG_SIZE
+            ),
+            Image.Resampling.LANCZOS
+        )
+
+        # ----------------------------------------------------
+        # Convert to NumPy
+        # ----------------------------------------------------
+
+        img_array = np.asarray(
+            img,
+            dtype=np.float32
+        )
+
+        # ----------------------------------------------------
+        # Add batch dimension
+        # ----------------------------------------------------
+
+        img_batch = np.expand_dims(
+            img_array,
+            axis=0
+        )
+
+        print(
+            f"[IMAGE] Processed shape: "
+            f"{img_batch.shape}"
+        )
+
+        print(
+            f"[IMAGE] Data type: "
+            f"{img_batch.dtype}"
+        )
+
+        print(
+            f"[IMAGE] Data range: "
+            f"{img_batch.min():.2f} - "
+            f"{img_batch.max():.2f}"
+        )
+
+        print(
+            "[IMAGE] Image processed successfully."
+        )
+
+        return img_batch
+
+    except Exception as e:
+
+        print(
+            "[IMAGE] Error preprocessing image:"
+        )
+
+        print(
+            f"{type(e).__name__}: {e}"
+        )
+
+        return None
+
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.route("/")
+def home():
+
     return jsonify({
+
         "status": "online",
-        "message": "AgroSmart AI Backend API is running successfully!",
-        "version": "2.0.0",
-        "models": {
-            "crop_recommendation": {
-                "loaded": crop_rf_model is not None,
-                "classes_count": len(crop_label_encoder.classes_) if crop_label_encoder else 0
-            },
-            "plant_disease": {
-                "tflite_loaded": tflite_interpreter is not None,
-                "keras_loaded": disease_model is not None,
-                "classes_count": len(disease_class_names),
-                "advisory_records": len(disease_info_db)
-            }
-        }
+
+        "message":
+            "AgroSmart AI Backend API "
+            "is running successfully!"
+
     })
 
-# ---------------------------------------------------------------------
-# CROP RECOMMENDATION ENDPOINT
-# ---------------------------------------------------------------------
-@app.route("/predict-crop", methods=["POST", "OPTIONS"])
+
+@app.route("/api/tts/kannada", methods=["POST"])
+def synthesize_kannada():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+
+    text = data.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "Speech text is required."}), 400
+    if len(text.encode("utf-8")) > 5000:
+        return jsonify({"error": "Speech text must be 5000 bytes or fewer."}), 413
+
+    api_key = os.environ.get("GOOGLE_TTS_API_KEY")
+    if not api_key:
+        return jsonify({
+            "error": "Kannada speech is not configured. Set GOOGLE_TTS_API_KEY on the backend."
+        }), 503
+
+    payload = json.dumps({
+        "input": {"text": text},
+        "voice": {"languageCode": "kn-IN"},
+        "audioConfig": {"audioEncoding": "MP3", "speakingRate": 0.95},
+    }).encode("utf-8")
+    endpoint = (
+        "https://texttospeech.googleapis.com/v1/text:synthesize"
+        f"?key={quote(api_key)}"
+    )
+    api_request = urllib.request.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(api_request, timeout=20) as api_response:
+            result = json.loads(api_response.read().decode("utf-8"))
+    except urllib.error.HTTPError:
+        return jsonify({"error": "Kannada speech service rejected the request."}), 502
+    except urllib.error.URLError:
+        return jsonify({"error": "Kannada speech service could not be reached."}), 502
+
+    audio_content = result.get("audioContent")
+    if not isinstance(audio_content, str):
+        return jsonify({"error": "Kannada speech service returned no audio."}), 502
+
+    try:
+        audio = base64.b64decode(audio_content, validate=True)
+    except (ValueError, binascii.Error):
+        return jsonify({"error": "Kannada speech service returned invalid audio."}), 502
+    return Response(audio, mimetype="audio/mpeg")
+
+
+# ============================================================
+# KANNADA CHAT ASSISTANT
+# ============================================================
+
+@app.route(
+    "/api/chat",
+    methods=["POST"]
+)
+def chat():
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "error": "A JSON request body is required."
+        }), 400
+
+    message = data.get("message")
+
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({
+            "success": False,
+            "error": "Please enter a question."
+        }), 400
+
+    if len(message) > 4000:
+        return jsonify({
+            "success": False,
+            "error": "The question is too long."
+        }), 413
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+    if not api_key:
+        return jsonify({
+            "success": False,
+            "error": "AI_NOT_CONFIGURED"
+        }), 503
+
+    history = data.get("history", [])
+    contents = []
+    saw_user_turn = False
+
+    if isinstance(history, list):
+        for turn in history[-12:]:
+            if not isinstance(turn, dict):
+                continue
+
+            turn_text = turn.get("text")
+            turn_role = turn.get("role")
+
+            if not isinstance(turn_text, str) or not turn_text.strip():
+                continue
+
+            if turn_role == "user":
+                role = "user"
+                saw_user_turn = True
+            elif turn_role == "assistant" and saw_user_turn:
+                role = "model"
+            else:
+                continue
+
+            contents.append({
+                "role": role,
+                "parts": [{"text": turn_text[:4000]}]
+            })
+
+    contents.append({
+        "role": "user",
+        "parts": [{"text": message.strip()}]
+    })
+
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{quote(model, safe='')}:generateContent"
+    )
+    payload = {
+        "systemInstruction": {
+            "parts": [{
+                "text": (
+                    "ನೀವು AgroSmart ಕೃಷಿ ಅಪ್ಲಿಕೇಶನ್‌ನ ಸಹಾಯಕರು. "
+                    "ಬಳಕೆದಾರರು ಕನ್ನಡದಲ್ಲಿ ಅಥವಾ ಕನ್ನಡ-ಇಂಗ್ಲಿಷ್ ಮಿಶ್ರವಾಗಿ "
+                    "ಕೇಳಬಹುದು. ಪ್ರತಿಯೊಂದು ಉತ್ತರವನ್ನು ಸರಳ, ಸಹಜ ಕನ್ನಡದಲ್ಲಿ ನೀಡಿ; "
+                    "ಅಗತ್ಯವಿದ್ದಾಗ technical English ಪದಗಳನ್ನು ಉಳಿಸಬಹುದು. "
+                    "ಹಿಂದಿನ ಸಂಭಾಷಣೆಯ ಸಂದರ್ಭವನ್ನು ಬಳಸಿ. AgroSmart ವೈಶಿಷ್ಟ್ಯಗಳ "
+                    "ಬಗ್ಗೆ ತಿಳಿದಿರುವುದನ್ನು ವಿವರಿಸಿ. live sensor ಅಥವಾ ಹವಾಮಾನ "
+                    "ಮಾಹಿತಿ ನಿಮ್ಮ ಬಳಿ ಇಲ್ಲದಿದ್ದರೆ ಇದೆ ಎಂದು ಹೇಳಬೇಡಿ. ಬೆಳೆ, "
+                    "ರೋಗ ಅಥವಾ ರಾಸಾಯನಿಕ ಬಳಕೆಯ ಬಗ್ಗೆ ಖಚಿತವಲ್ಲದ ಸಲಹೆಯನ್ನು "
+                    "ನೀಡಬೇಡಿ; ಅಗತ್ಯವಿದ್ದರೆ ಸ್ಥಳೀಯ ಕೃಷಿ ತಜ್ಞರನ್ನು ಸಂಪರ್ಕಿಸಲು ಹೇಳಿ. "
+                    "ಸಾಧನದ command ಅನ್ನು ನಿಜವಾಗಿ ಕಾರ್ಯಗತಗೊಳಿಸಲಾಗಿದೆ ಎಂದು "
+                    "ಹೇಳಬೇಡಿ; command ಅನ್ನು ಅಪ್ಲಿಕೇಶನ್ ನಿರ್ವಹಿಸುತ್ತದೆ."
+                )
+            }]
+        },
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 900
+        }
+    }
+    api_request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(api_request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        print(f"[CHAT ERROR] Gemini returned HTTP {error.code}")
+        return jsonify({
+            "success": False,
+            "error": "AI_SERVICE_ERROR"
+        }), 502
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        print(f"[CHAT ERROR] {type(error).__name__}: {error}")
+        return jsonify({
+            "success": False,
+            "error": "AI_SERVICE_UNAVAILABLE"
+        }), 502
+
+    candidates = result.get("candidates", [])
+    if not candidates:
+        return jsonify({
+            "success": False,
+            "error": "AI returned no answer. Please rephrase the question."
+        }), 502
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    reply = "\n".join(
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ).strip()
+
+    if not reply:
+        return jsonify({
+            "success": False,
+            "error": "AI returned an empty answer. Please rephrase the question."
+        }), 502
+
+    return jsonify({
+        "success": True,
+        "reply": reply
+    })
+
+
+# ============================================================
+# CROP PREDICTION
+# ============================================================
+
+@app.route(
+    "/predict-crop",
+    methods=["POST"]
+)
 def predict_crop():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+
     try:
-        data = request.get_json(force=True, silent=True) or {}
 
-        # Safe feature mapping dictionary
-        feature_map = {
-            "N": ["N", "n", "nitrogen", "Nitrogen"],
-            "P": ["P", "p", "phosphorus", "Phosphorus"],
-            "K": ["K", "k", "potassium", "Potassium"],
-            "temperature": ["temperature", "temp", "Temperature", "Temp"],
-            "humidity": ["humidity", "humid", "Humidity"],
-            "ph": ["ph", "pH", "Ph", "PH"],
-            "rainfall": ["rainfall", "rain", "Rainfall", "Rain"]
-        }
+        if crop_rf_model is None:
 
-        values = []
-        if isinstance(data, list):
-            values = [float(v) for v in data[:7]]
-        elif isinstance(data, dict):
-            if "input" in data and isinstance(data["input"], list):
-                values = [float(v) for v in data["input"][:7]]
-            elif "features" in data and isinstance(data["features"], list):
-                values = [float(v) for v in data["features"][:7]]
-            else:
-                for feat in crop_features:
-                    found_val = 0.0
-                    aliases = feature_map.get(feat, [feat])
-                    for k in aliases:
-                        if k in data and data[k] not in (None, ""):
-                            try:
-                                found_val = float(data[k])
-                                break
-                            except (ValueError, TypeError):
-                                pass
-                    values.append(found_val)
-
-        if len(values) < 7:
             return jsonify({
-                "error": "Invalid input. Expected 7 parameters: N, P, K, temperature, humidity, pH, rainfall.",
-                "success": False
+
+                "success": False,
+
+                "error":
+                    "Crop recommendation model "
+                    "is not loaded."
+
+            }), 503
+
+
+        data = request.get_json(
+            silent=True
+        )
+
+
+        if not data:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "No JSON data received."
+
             }), 400
 
-        df_input = pd.DataFrame([values[:7]], columns=crop_features)
-        probabilities = crop_rf_model.predict_proba(df_input)[0]
 
-        top5_indices = np.argsort(probabilities)[::-1][:5]
+        if "input" not in data:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "Missing 'input' field."
+
+            }), 400
+
+
+        values = data["input"]
+
+
+        df_input = pd.DataFrame(
+            [values],
+            columns=crop_features
+        )
+
+
+        probabilities = (
+            crop_rf_model
+            .predict_proba(
+                df_input
+            )[0]
+        )
+
+
+        top5_indices = (
+            np.argsort(
+                probabilities
+            )[::-1][:5]
+        )
+
+
         result = []
+
+
         for idx in top5_indices:
+
             result.append({
-                "crop": str(crop_label_encoder.classes_[idx]),
-                "prob": round(float(probabilities[idx] * 100), 2)
+
+                "crop":
+                    str(
+                        crop_label_encoder
+                        .classes_[idx]
+                    ),
+
+                "prob":
+                    round(
+                        float(
+                            probabilities[idx]
+                            * 100
+                        ),
+                        2
+                    )
+
             })
 
-        return jsonify(result)
+
+        return jsonify(
+            result
+        )
+
 
     except Exception as e:
-        return jsonify({"error": f"Crop prediction error: {str(e)}", "success": False}), 400
 
-app.add_url_rule("/api/predict-crop", endpoint="api_predict_crop", view_func=predict_crop, methods=["POST", "OPTIONS"])
-
-
-# ---------------------------------------------------------------------
-# IRRIGATION & WEATHER ENDPOINTS (FOR SOIL IRRIGATION PAGE)
-# ---------------------------------------------------------------------
-OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "")
-
-@app.route("/weather", methods=["GET", "OPTIONS"])
-def weather():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
-    try:
-        city = request.args.get("city", "Udupi")
-        lat = request.args.get("lat")
-        lon = request.args.get("lon")
-
-        weather_info = {
-            "temperature": float(sensor_data.get("temperature", 28) or 28),
-            "humidity": float(sensor_data.get("humidity", 75) or 75),
-            "city": city,
-            "description": "Clear Sky",
-            "wind_speed": 12.0,
-            "source": "sensor_default"
-        }
-
-        # Query OpenWeatherMap API
-        try:
-            import urllib.request
-            if lat and lon:
-                owm_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric"
-            else:
-                owm_url = f"https://api.openweathermap.org/data/2.5/weather?q={urllib.parse.quote(city)}&appid={OPENWEATHER_API_KEY}&units=metric"
-
-            req = urllib.request.Request(owm_url, headers={"User-Agent": "AgroSmart-App/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as res:
-                if res.status == 200:
-                    data = json.loads(res.read().decode())
-                    weather_info.update({
-                        "temperature": round(float(data["main"]["temp"]), 1),
-                        "feels_like": round(float(data["main"].get("feels_like", data["main"]["temp"])), 1),
-                        "humidity": float(data["main"]["humidity"]),
-                        "pressure": float(data["main"].get("pressure", 1013)),
-                        "wind_speed": round(float(data.get("wind", {}).get("speed", 0) * 3.6), 1), # km/h
-                        "description": data["weather"][0]["description"].capitalize() if data.get("weather") else "Clear",
-                        "icon": data["weather"][0]["icon"] if data.get("weather") else "01d",
-                        "city": data.get("name", city),
-                        "country": data.get("sys", {}).get("country", "IN"),
-                        "sunrise": data.get("sys", {}).get("sunrise"),
-                        "sunset": data.get("sys", {}).get("sunset"),
-                        "source": "openweathermap"
-                    })
-        except Exception as owm_err:
-            # If OpenWeather key is still propagating or throttled, return safe fallback
-            weather_info["owm_notice"] = str(owm_err)
-
-        return jsonify(weather_info)
-    except Exception as e:
-        return jsonify({"error": str(e), "temperature": 28, "humidity": 75, "city": "Udupi"}), 200
-
-app.add_url_rule("/api/weather", endpoint="api_weather", view_func=weather, methods=["GET", "OPTIONS"])
-
-
-@app.route("/predict", methods=["POST", "OPTIONS"])
-def predict_irrigation():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        soil_moisture = float(data.get("soil_moisture", 0) or 0)
-        temp = float(data.get("temperature", 30) or 30)
-        humidity = float(data.get("humidity", 60) or 60)
-
-        # Irrigation decision logic
-        needs_irrigation = 1 if (soil_moisture < 35 or humidity < 50 or temp > 35) else 0
+        print(
+            f"[CROP PREDICTION ERROR] {e}"
+        )
 
         return jsonify({
-            "prediction": needs_irrigation,
-            "status": "success"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e), "success": False}), 400
 
-app.add_url_rule("/api/predict", endpoint="api_predict_irrigation", view_func=predict_irrigation, methods=["POST", "OPTIONS"])
+            "success": False,
 
+            "error":
+                f"Crop prediction error: {str(e)}"
 
-# ---------------------------------------------------------------------
-# PLANT LEAF BOTANICAL & OOD IMAGE VALIDATOR (OPTION 2 DEEP GATEKEEPER)
-# ---------------------------------------------------------------------
-def check_text_document(pil_img):
-    """
-    Rapidly detects text documents, marksheets, certificates, receipts,
-    and printed pages via statistical color and high-contrast edge variance.
-    """
-    try:
-        rgb = pil_img.convert('RGB')
-        arr = np.array(rgb, dtype=np.float32)
-        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-        max_c = np.maximum(np.maximum(r, g), b)
-        min_c = np.minimum(np.minimum(r, g), b)
-        delta = max_c - min_c
-
-        # Saturation calculation
-        sat = np.where(max_c > 0, delta / np.maximum(max_c, 1e-5), 0.0)
-        mean_sat = float(np.mean(sat))
-        mean_val = float(np.mean(max_c) / 255.0)
-
-        # High-contrast edge density (characteristic of typography and text glyphs)
-        gray = np.dot(arr[..., :3], [0.2989, 0.5870, 0.1140])
-        dx = np.diff(gray, axis=1)
-        dy = np.diff(gray, axis=0)
-        edge_density = float((np.mean(np.abs(dx) > 30) + np.mean(np.abs(dy) > 30)) / 2.0)
-
-        # Bright/white background with low saturation and distinct text edges
-        if mean_sat < 0.15 and mean_val > 0.65 and edge_density > 0.02:
-            return True, f"Text document or sheet detected (Saturation: {mean_sat*100:.1f}%, Brightness: {mean_val*100:.1f}%)."
-    except Exception as e:
-        pass
-    return False, ""
+        }), 400
 
 
-def validate_plant_image(pil_img):
-    try:
-        # 1. Fast Document / Marksheet / Text Scan Filter
-        is_doc, doc_msg = check_text_document(pil_img)
-        if is_doc:
-            print(f"[GATEKEEPER] Document filter caught: {doc_msg}")
-            return False, "Document or text sheet detected. Please upload a clear photo of a crop or plant leaf."
+# ============================================================
+# DISEASE PREDICTION
+# ============================================================
 
-        # =============================================================
-        # 2. PRE-TRAINED OPEN-SOURCE IMAGENET DEEP LEARNING GATEKEEPER
-        # =============================================================
-        if gatekeeper_interpreter is not None and imagenet_class_names:
-            try:
-                gk_resized = pil_img.resize((224, 224))
-                gk_arr = np.array(gk_resized, dtype=np.float32)
-                gk_norm = (gk_arr / 127.5) - 1.0
-                gk_batch = np.expand_dims(gk_norm, axis=0)
-
-                gatekeeper_interpreter.set_tensor(gatekeeper_input_details[0]['index'], gk_batch)
-                gatekeeper_interpreter.invoke()
-                gk_preds = gatekeeper_interpreter.get_tensor(gatekeeper_output_details[0]['index'])[0]
-
-                top5_idx = np.argsort(gk_preds)[::-1][:5]
-                top_gk_idx = int(top5_idx[0])
-                top_gk_conf = float(gk_preds[top_gk_idx])
-                top_gk_label = imagenet_class_names[top_gk_idx].lower() if top_gk_idx < len(imagenet_class_names) else ""
-                top5_labels = [imagenet_class_names[i].lower() for i in top5_idx if i < len(imagenet_class_names)]
-
-                # Plant & Botanical Safe Keywords
-                plant_safe_keywords = [
-                    'leaf', 'tree', 'flower', 'daisy', 'rose', 'pot', 'vase', 'greenhouse', 'plant',
-                    'cabbage', 'broccoli', 'cauliflower', 'zucchini', 'squash', 'cucumber', 'artichoke',
-                    'cardoon', 'mushroom', 'rapeseed', 'corn', 'ear', 'hay', 'banana', 'orange', 'lemon',
-                    'fig', 'pineapple', 'custard_apple', 'pomegranate', 'strawberry', 'acorn', 'slipper',
-                    'agaric', 'gyromitra', 'stinkhorn', 'earthstar', 'hen-of-the-woods', 'bolete', 'bell_pepper',
-                    'jackfruit', 'butternut_squash', 'spaghetti_squash', 'acorn_squash', 'head_cabbage',
-                    'garden_spider', 'barn_spider', 'honeycomb'
-                ]
-
-                # Explicit Document, Screen, Office, and Tech keywords in ImageNet
-                doc_or_tech_keywords = [
-                    'web_site', 'comic_book', 'crossword', 'book', 'menu', 'envelope', 'notebook',
-                    'paper', 'binder', 'carton', 'packet', 'screen', 'monitor', 'television', 'laptop',
-                    'desktop_computer', 'printer', 'cellular', 'telephone', 'switch', 'scoreboard',
-                    'poster', 'ruler', 'slide_rule', 'eraser', 'pencil', 'fountain_pen', 'ballpoint',
-                    'oscilloscope', 'vending_machine', 'washer', 'microwave'
-                ]
-
-                # Document / Screen detection in Deep Model
-                is_doc_deep = any(any(dk in lbl for dk in doc_or_tech_keywords) for lbl in top5_labels[:3])
-                doc_conf_deep = sum(float(gk_preds[i]) for i in top5_idx if any(dk in imagenet_class_names[i].lower() for dk in doc_or_tech_keywords))
-
-                if is_doc_deep and doc_conf_deep > 0.15:
-                    clean_name = top_gk_label.replace('_', ' ').title()
-                    print(f"[GATEKEEPER] Deep model caught document/screen: {clean_name} ({doc_conf_deep*100:.1f}%)")
-                    return False, f"Document or screenshot detected ({clean_name}). Please upload a clear photo of a plant leaf."
-
-                # General Non-Plant Entity Check (Animals, Vehicles, Humans, Electronics, Clothes)
-                is_plant_keyword = any(k in top_gk_label for k in plant_safe_keywords)
-                if not is_plant_keyword and top_gk_conf > 0.20:
-                    clean_name = top_gk_label.replace('_', ' ').title()
-                    print(f"[GATEKEEPER] Rejected non-plant object: {clean_name} (Confidence: {top_gk_conf*100:.1f}%)")
-                    return False, f"Non-plant entity detected ({clean_name}). Please upload a photo of a plant leaf."
-            except Exception as e_gk_run:
-                print(f"[GATEKEEPER] Notice during inference: {e_gk_run}")
-
-        return True, "Valid plant image"
-    except Exception:
-        return True, "Valid"
-
-
-# ---------------------------------------------------------------------
-# UNIVERSAL IMAGE FORMAT NORMALIZER (HANDLES ALL FORMATS & ORIENTATIONS)
-# ---------------------------------------------------------------------
-def normalize_image(img_bytes):
-    """
-    Universally converts any image format (JPEG, PNG with transparency,
-    WebP, BMP, TIFF, Grayscale, CMYK, Palette, truncated streams)
-    with automatic smartphone EXIF orientation correction into standard RGB.
-    """
-    import io
-    from PIL import Image, ImageOps, ImageFile
-    ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-    try:
-        raw_img = Image.open(io.BytesIO(img_bytes))
-    except Exception as e:
-        raise ValueError(f"Corrupted or unsupported image file format: {str(e)}")
-
-    # 1. Correct EXIF Orientation (fixes rotated smartphone photos)
-    try:
-        raw_img = ImageOps.exif_transpose(raw_img)
-    except Exception:
-        pass
-
-    # 2. Handle transparency (RGBA, LA, Palette with alpha) by blending on white background
-    if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
-        alpha_img = raw_img.convert("RGBA")
-        background = Image.new("RGBA", alpha_img.size, (255, 255, 255, 255))
-        blended = Image.alpha_composite(background, alpha_img)
-        rgb_img = blended.convert("RGB")
-    elif raw_img.mode != "RGB":
-        rgb_img = raw_img.convert("RGB")
-    else:
-        rgb_img = raw_img
-
-    return rgb_img
-
-
-# ---------------------------------------------------------------------
-# DISEASE PREDICTION ENDPOINT (BULLETPROOF IN-MEMORY IMAGE PROCESSING)
-# ---------------------------------------------------------------------
-@app.route("/predict-disease", methods=["POST", "OPTIONS"])
+@app.route(
+    "/api/predict",
+    methods=["POST"]
+)
 def predict_disease():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+
     try:
-        img_bytes = None
 
-        # 1. Check Multipart file upload
-        if request.files:
-            for key in ["image", "file", "photo", "upload", "leaf"]:
-                if key in request.files and request.files[key].filename:
-                    img_bytes = request.files[key].read()
-                    break
-            if not img_bytes:
-                # Take first available uploaded file
-                first_file = next(iter(request.files.values()), None)
-                if first_file and first_file.filename:
-                    img_bytes = first_file.read()
+        print()
+        print("=" * 60)
+        print("NEW DISEASE PREDICTION REQUEST")
+        print("=" * 60)
 
-        # 2. Check JSON Base64 payload
-        if not img_bytes:
-            json_data = request.get_json(force=True, silent=True) or {}
-            img_b64 = json_data.get("image") or json_data.get("file") or json_data.get("data")
-            if img_b64 and isinstance(img_b64, str):
-                if "," in img_b64:
-                    img_b64 = img_b64.split(",", 1)[1]
-                import base64
-                img_bytes = base64.b64decode(img_b64)
 
-        if not img_bytes:
+        # ----------------------------------------------------
+        # CHECK IMAGE
+        # ----------------------------------------------------
+
+        if "image" not in request.files:
+
+            print(
+                "[ERROR] Image field missing."
+            )
+
             return jsonify({
-                "error": "No image provided. Please upload an image file or provide a base64 image.",
-                "success": False
+
+                "success": False,
+
+                "error":
+                    "No image field in request. "
+                    "Use field name 'image'."
+
             }), 400
 
-        # Universal image normalization & format conversion
+
+        file = request.files[
+            "image"
+        ]
+
+
+        # ----------------------------------------------------
+        # CHECK FILE NAME
+        # ----------------------------------------------------
+
+        if not file.filename:
+
+            print(
+                "[ERROR] Empty filename."
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "No file selected."
+
+            }), 400
+
+
+        print(
+            f"[UPLOAD] Filename: "
+            f"{file.filename}"
+        )
+
+
+        # ----------------------------------------------------
+        # CHECK EXTENSION
+        # ----------------------------------------------------
+
+        if not allowed_file(
+            file.filename
+        ):
+
+            print(
+                "[ERROR] Invalid file extension."
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "Invalid file type. "
+                    "Allowed: "
+                    + ", ".join(
+                        sorted(
+                            ALLOWED_EXTENSIONS
+                        )
+                    )
+
+            }), 400
+
+
+        # ----------------------------------------------------
+        # CHECK FILE SIZE
+        # ----------------------------------------------------
+
+        file.seek(
+            0,
+            os.SEEK_END
+        )
+
+        file_size = file.tell()
+
+        file.seek(0)
+
+
+        print(
+            f"[UPLOAD] File size: "
+            f"{file_size / (1024 * 1024):.2f} MB"
+        )
+
+
+        if file_size == 0:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "Uploaded file is empty."
+
+            }), 400
+
+
+        if file_size > MAX_FILE_SIZE:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "File too large. "
+                    f"Maximum size is "
+                    f"{MAX_FILE_SIZE / (1024 * 1024):.1f} MB."
+
+            }), 400
+
+
+        # ----------------------------------------------------
+        # CHECK MODEL
+        # ----------------------------------------------------
+
+        if disease_model is None:
+
+            print(
+                "[ERROR] Disease model is not loaded."
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "Disease prediction model "
+                    "is not loaded."
+
+            }), 503
+
+
+        if not disease_class_names:
+
+            print(
+                "[ERROR] Class names are not loaded."
+            )
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "class_names.json is not loaded."
+
+            }), 503
+
+
+        # ----------------------------------------------------
+        # TEMP IMAGE PATH
+        # ----------------------------------------------------
+
+        temp_path = os.path.join(
+
+            BASE_DIR,
+
+            "temp_"
+            + os.urandom(8).hex()
+            + ".png"
+
+        )
+
+
+        print(
+            f"[UPLOAD] Temporary path: "
+            f"{temp_path}"
+        )
+
+
+        # ----------------------------------------------------
+        # SAVE IMAGE
+        # ----------------------------------------------------
+
+        file.save(
+            temp_path
+        )
+
+
         try:
-            pil_img = normalize_image(img_bytes)
-            # Downsample large smartphone photos to max 512x512 to prevent Render 512MB RAM OOM crash
-            pil_img.thumbnail((512, 512))
-        except ValueError as ve:
-            return jsonify({"error": str(ve), "success": False}), 400
 
-        # Botanical / Non-plant validation check via Deep Learning Gatekeeper
-        is_plant, val_msg = validate_plant_image(pil_img)
-        if not is_plant:
+            # ------------------------------------------------
+            # PREPROCESS
+            # ------------------------------------------------
+
+            img_batch = preprocess_image(
+                temp_path
+            )
+
+
+            if img_batch is None:
+
+                return jsonify({
+
+                    "success": False,
+
+                    "error":
+                        "Could not process image. "
+                        "Ensure it is a valid JPG, JPEG, "
+                        "PNG, or WEBP image."
+
+                }), 400
+
+
+            # ------------------------------------------------
+            # MODEL PREDICTION
+            # ------------------------------------------------
+
+            print(
+                "[PREDICTION] Running model..."
+            )
+
+
+            predictions = (
+                disease_model.predict(
+                    img_batch,
+                    verbose=0
+                )[0]
+            )
+
+
+            print(
+                "[PREDICTION] Model prediction completed."
+            )
+
+
+            # ------------------------------------------------
+            # VERIFY OUTPUT
+            # ------------------------------------------------
+
+            if len(predictions) != len(
+                disease_class_names
+            ):
+
+                print(
+                    "[ERROR] Model output does not "
+                    "match class names."
+                )
+
+                print(
+                    f"Model outputs: "
+                    f"{len(predictions)}"
+                )
+
+                print(
+                    f"Class names: "
+                    f"{len(disease_class_names)}"
+                )
+
+                return jsonify({
+
+                    "success": False,
+
+                    "error":
+                        "Model output classes do not "
+                        "match class_names.json."
+
+                }), 500
+
+
+            # ------------------------------------------------
+            # TOP PREDICTION
+            # ------------------------------------------------
+
+            top_idx = int(
+                np.argmax(
+                    predictions
+                )
+            )
+
+
+            top_confidence = (
+                float(
+                    predictions[
+                        top_idx
+                    ]
+                )
+                * 100
+            )
+
+
+            top_label = (
+                disease_class_names[
+                    top_idx
+                ]
+            )
+
+
+            # ------------------------------------------------
+            # PARSE LABEL
+            # ------------------------------------------------
+
+            plant, disease, label = (
+                parse_label(
+                    top_label
+                )
+            )
+
+
+            print()
+            print(
+                "----------------------------------------"
+            )
+
+            print(
+                f"[PREDICTION] Plant: "
+                f"{plant}"
+            )
+
+            print(
+                f"[PREDICTION] Disease: "
+                f"{disease}"
+            )
+
+            print(
+                f"[PREDICTION] Label: "
+                f"{label}"
+            )
+
+            print(
+                f"[PREDICTION] Confidence: "
+                f"{top_confidence:.2f}%"
+            )
+
+            print(
+                "----------------------------------------"
+            )
+
+
+            # ------------------------------------------------
+            # LOW CONFIDENCE
+            # ------------------------------------------------
+
+            if (
+                top_confidence
+                < CONFIDENCE_THRESHOLD * 100
+            ):
+
+                print(
+                    "[PREDICTION] Low confidence."
+                )
+
+
+                return jsonify({
+
+                    "success": True,
+
+                    "prediction": {
+
+                        "plant":
+                            "Unknown",
+
+                        "disease":
+                            "Uncertain",
+
+                        "label":
+                            "Unknown",
+
+                        "confidence":
+                            round(
+                                top_confidence,
+                                2
+                            )
+
+                    },
+
+                    "message":
+                        f"Prediction confidence is "
+                        f"{top_confidence:.1f}%. "
+                        "Please upload a clearer "
+                        "plant leaf image."
+
+                })
+
+
+            # ------------------------------------------------
+            # SUCCESS
+            # ------------------------------------------------
+
             return jsonify({
-                "error": val_msg,
-                "is_leaf": False,
-                "success": False
-            }), 400
 
-        pil_resized = pil_img.resize((224, 224))
-        img_array = np.array(pil_resized, dtype=np.float32)
-        img_batch = np.expand_dims(img_array, axis=0)
+                "success": True,
 
-        # Genuine ML Model Inference
-        if tflite_interpreter is not None:
-            tflite_interpreter.set_tensor(tflite_input_details[0]['index'], img_batch)
-            tflite_interpreter.invoke()
-            preds = tflite_interpreter.get_tensor(tflite_output_details[0]['index'])[0]
-        elif disease_model is not None:
-            preds = disease_model(img_batch, training=False).numpy()[0]
-        else:
-            return jsonify({
-                "error": "Plant Disease ML model is not initialized yet.",
-                "success": False
-            }), 500
+                "prediction": {
 
-        top_idx = int(np.argmax(preds))
-        confidence = round(float(preds[top_idx]) * 100, 2)
+                    "plant":
+                        plant,
 
-        if disease_class_names and top_idx < len(disease_class_names):
-            label = disease_class_names[top_idx]
-        else:
-            label = f"Class_{top_idx}"
+                    "disease":
+                        disease,
 
-        top_indices = np.argsort(preds)[::-1][:5]
-        top_predictions = []
-        for idx in top_indices:
-            cls_name = disease_class_names[idx] if idx < len(disease_class_names) else f"Class_{idx}"
-            top_predictions.append({
-                "label": cls_name,
-                "confidence": round(float(preds[idx]) * 100, 2)
+                    "label":
+                        label,
+
+                    "confidence":
+                        round(
+                            top_confidence,
+                            2
+                        )
+
+                }
+
             })
 
-        # Memory Cleanup
-        del img_batch
-        del img_array
-        del pil_img
-        gc.collect()
 
-        info_record = disease_info_db.get(label, {})
+        finally:
+
+            # ------------------------------------------------
+            # DELETE TEMP FILE
+            # ------------------------------------------------
+
+            if os.path.exists(
+                temp_path
+            ):
+
+                try:
+
+                    os.remove(
+                        temp_path
+                    )
+
+                    print(
+                        "[FILE] Temporary image deleted."
+                    )
+
+                except Exception as e:
+
+                    print(
+                        f"[FILE] Could not delete "
+                        f"temporary image: {e}"
+                    )
+
+
+    except Exception as e:
+
+        print()
+        print(
+            "[DISEASE PREDICTION ERROR]"
+        )
+
+        print(
+            f"{type(e).__name__}: {e}"
+        )
+
 
         return jsonify({
+
+            "success": False,
+
+            "error":
+                f"Prediction error: {str(e)}"
+
+        }), 500
+
+
+# ============================================================
+# LEGACY DISEASE ENDPOINT
+# ============================================================
+
+@app.route(
+    "/predict-disease",
+    methods=["POST"]
+)
+def predict_disease_legacy():
+
+    return predict_disease()
+
+
+# ============================================================
+# SENSOR POST
+# ============================================================
+
+@app.route(
+    "/sensor",
+    methods=["POST"]
+)
+def receive_sensor():
+
+    global sensor_data
+
+    try:
+
+        data = request.get_json(
+            silent=True
+        )
+
+
+        if data is None:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    "Invalid JSON data."
+
+            }), 400
+
+
+        sensor_data = data
+
+
+        return jsonify({
+
             "success": True,
-            "status": "success",
-            "label": label,
-            "confidence": confidence,
-            "prediction": {
-                "label": label,
-                "confidence": confidence
-            },
-            "disease_info": info_record,
-            "top_predictions": top_predictions
+
+            "message":
+                "Sensor data received successfully",
+
+            "data":
+                sensor_data
+
         })
 
+
     except Exception as e:
-        return jsonify({"error": f"Disease prediction error: {str(e)}", "success": False}), 500
 
-app.add_url_rule("/api/predict-disease", endpoint="api_predict_disease", view_func=predict_disease, methods=["POST", "OPTIONS"])
+        return jsonify({
 
+            "success": False,
 
-# ---------------------------------------------------------------------
-# ESP32 IOT SENSOR ENDPOINTS
-# ---------------------------------------------------------------------
-@app.route("/sensor", methods=["POST"])
-def receive_sensor():
-    global sensor_data
-    try:
-        sensor_data = request.get_json(force=True, silent=True) or sensor_data
-        return jsonify({"message": "Sensor data received successfully", "data": sensor_data})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+            "error":
+                str(e)
 
-app.add_url_rule("/api/sensor", endpoint="api_receive_sensor", view_func=receive_sensor, methods=["POST"])
+        }), 400
 
 
-@app.route("/get_sensor", methods=["GET"])
+# ============================================================
+# SENSOR GET
+# ============================================================
+
+@app.route(
+    "/get_sensor",
+    methods=["GET"]
+)
 def get_sensor():
-    return jsonify(sensor_data)
 
-app.add_url_rule("/api/get_sensor", endpoint="api_get_sensor", view_func=get_sensor, methods=["GET"])
-
-
-# =====================================================================
-# 4. AUTOMATIC KEEP-ALIVE PINGER (PREVENTS RENDER FROM SLEEPING)
-# =====================================================================
-def start_keep_alive():
-    import threading
-    import time
-    import urllib.request
-
-    def pinger():
-        time.sleep(30)
-        target_url = os.environ.get("RENDER_EXTERNAL_URL", "https://agrosmart-of05.onrender.com/health")
-        if not target_url.endswith("/health"):
-            target_url = target_url.rstrip("/") + "/health"
-        while True:
-            try:
-                time.sleep(600)  # Ping every 10 minutes (Render inactivity timer is 15 min)
-                req = urllib.request.Request(target_url, headers={"User-Agent": "AgroSmart-KeepAlive/1.0"})
-                with urllib.request.urlopen(req, timeout=15) as res:
-                    print(f"[KEEP-ALIVE] Pinged {target_url} - Status {res.status}")
-            except Exception as e:
-                print(f"[KEEP-ALIVE] Ping notice: {e}")
-
-    thread = threading.Thread(target=pinger, daemon=True)
-    thread.start()
-
-start_keep_alive()
+    return jsonify(
+        sensor_data
+    )
 
 
-# =====================================================================
-# SERVER INITIALIZATION
-# =====================================================================
+# ============================================================
+# SERVER START
+# ============================================================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
 
+    print()
+    print("=" * 60)
+    print("              AgroSmart AI Backend")
+    print("=" * 60)
+
+    print(
+        f"Disease Model: "
+        f"{'LOADED' if disease_model is not None else 'NOT LOADED'}"
+    )
+
+    print(
+        f"Classes: "
+        f"{len(disease_class_names)}"
+    )
+
+    print(
+        f"Image Size: "
+        f"{IMG_SIZE} x {IMG_SIZE}"
+    )
+
+    print(
+        "Disease API:"
+    )
+
+    print(
+        "http://127.0.0.1:5000/api/predict"
+    )
+
+    print(
+        "Server:"
+    )
+
+    print(
+        "http://127.0.0.1:5000"
+    )
+
+    print("=" * 60)
+    print()
+
+
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True
+    )
