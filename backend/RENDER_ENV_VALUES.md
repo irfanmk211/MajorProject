@@ -25,3 +25,11 @@ Render dashboard:
 
 Do not add `PORT` manually; Render supplies it. Do not place service-account,
 Cloudinary, Gemini, or Google TTS secrets in frontend variables or GitHub.
+
+## Disease prediction runtime
+
+Disease prediction uses the checked-in `plant_disease_model.tflite` model with
+the LiteRT CPU runtime. The API no longer loads TensorFlow at startup, which
+reduces memory use on Render's free instance. Keep the `.tflite` file and
+`class_names.json` in the backend deployment. No additional Render environment
+variables are required for inference.

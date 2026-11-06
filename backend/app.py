@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import secrets
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -30,20 +31,14 @@ except ImportError:
     pass
 
 # ============================================================
-# TENSORFLOW
+# LITERT
 # ============================================================
 
-os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
-os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-
 try:
-    import tensorflow as tf
-    from tensorflow.keras.models import load_model
+    from ai_edge_litert.interpreter import Interpreter
 except ImportError as e:
-    print(f"[TENSORFLOW ERROR] {e}")
-    tf = None
-    load_model = None
+    print(f"[LITERT ERROR] {e}")
+    Interpreter = None
 
 
 # ============================================================
@@ -74,7 +69,7 @@ CROP_MODEL_PATH = os.path.join(BASE_DIR, "crop_model.pkl")
 
 DISEASE_MODEL_PATH = os.path.join(
     BASE_DIR,
-    "plant_disease_model.keras"
+    "plant_disease_model.tflite"
 )
 
 CLASS_NAMES_PATH = os.path.join(
@@ -217,7 +212,10 @@ except Exception as e:
 # ============================================================
 
 disease_model = None
+disease_input_details = None
+disease_output_details = None
 disease_class_names = []
+disease_inference_lock = threading.Lock()
 
 
 print()
@@ -241,7 +239,7 @@ print(
 
 
 if (
-    load_model is not None
+    Interpreter is not None
     and os.path.exists(DISEASE_MODEL_PATH)
     and os.path.exists(CLASS_NAMES_PATH)
 ):
@@ -252,12 +250,16 @@ if (
             "[DISEASE MODEL] Loading model..."
         )
 
-        disease_model = load_model(
-            DISEASE_MODEL_PATH
+        disease_model = Interpreter(
+            model_path=DISEASE_MODEL_PATH,
+            num_threads=1
         )
+        disease_model.allocate_tensors()
+        disease_input_details = disease_model.get_input_details()[0]
+        disease_output_details = disease_model.get_output_details()[0]
 
         print(
-            "[DISEASE MODEL] Model loaded successfully."
+            "[DISEASE MODEL] LiteRT model loaded successfully."
         )
 
         # ----------------------------------------------------
@@ -290,22 +292,10 @@ if (
             )
 
         # ----------------------------------------------------
-        # Verify model output
-        # ----------------------------------------------------
-
-        try:
-
-            output_shape = (
-                disease_model.output_shape
-            )
-
-            print(
-                f"[DISEASE MODEL] Output shape: "
-                f"{output_shape}"
-            )
-
-        except Exception:
-            pass
+        print(
+            f"[DISEASE MODEL] Output shape: "
+            f"{disease_output_details['shape']}"
+        )
 
     except Exception as e:
 
@@ -315,6 +305,8 @@ if (
         )
 
         disease_model = None
+        disease_input_details = None
+        disease_output_details = None
         disease_class_names = []
 
 else:
@@ -1716,10 +1708,15 @@ def predict_disease():
             )
 
 
-            predictions = disease_model(
-                img_batch,
-                training=False
-            ).numpy()[0]
+            with disease_inference_lock:
+                disease_model.set_tensor(
+                    disease_input_details["index"],
+                    img_batch
+                )
+                disease_model.invoke()
+                predictions = disease_model.get_tensor(
+                    disease_output_details["index"]
+                )[0]
 
 
             print(
