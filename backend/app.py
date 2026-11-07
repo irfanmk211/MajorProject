@@ -790,7 +790,7 @@ def create_device_pair_code():
 
     try:
         firestore = admin_firestore.client(app=get_firebase_admin_app())
-        field_ref = firestore.collection("users", user["uid"], "farms", farm_id, "fields", field_id)
+        field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
         if not field_ref.get().exists:
             return jsonify({"error": "The selected field was not found in your account."}), 404
 
@@ -983,7 +983,7 @@ def update_device():
         device = device_snapshot.to_dict() or {}
         if device.get("motorState") == "on":
             return jsonify({"error": "Stop the motor before changing the device assignment."}), 409
-        field_ref = firestore.collection("users", user["uid"], "farms", farm_id, "fields", field_id)
+        field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
         if not field_ref.get().exists:
             return jsonify({"error": "The selected field was not found in your account."}), 404
         device_ref.update({
@@ -1094,7 +1094,7 @@ def receive_device_telemetry():
     field_id = device.get("fieldId")
     if not farm_id or not field_id:
         return jsonify({"error": "Device has no assigned farm field."}), 409
-    field_ref = firestore.collection("users", user_id, "farms", farm_id, "fields", field_id)
+    field_ref = firestore.document("users", user_id, "farms", farm_id, "fields", field_id)
     field_snapshot = field_ref.get()
     if not field_snapshot.exists:
         return jsonify({"error": "The assigned field no longer exists."}), 409
