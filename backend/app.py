@@ -637,7 +637,9 @@ def verify_user_request():
     except RuntimeError as error:
         print(f"[FIREBASE AUTH CONFIG ERROR] {error}")
         return None
-    except firebase_admin.exceptions.FirebaseError:
+    except firebase_admin.exceptions.FirebaseError as error:
+        error_code = getattr(error, "code", "unknown")
+        print(f"[FIREBASE AUTH VERIFY ERROR] {type(error).__name__} (code={error_code})")
         return None
 
 
