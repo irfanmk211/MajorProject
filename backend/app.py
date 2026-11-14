@@ -19,6 +19,7 @@ import cloudinary
 import cloudinary.uploader
 import firebase_admin
 from firebase_admin import auth as firebase_auth, credentials, firestore as admin_firestore, messaging
+from google.api_core.exceptions import GoogleAPICallError
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 from PIL import Image
@@ -643,6 +644,12 @@ def verify_user_request():
         return None
 
 
+class DeviceLookupError(Exception):
+    def __init__(self, error_type, error_code):
+        self.error_type = error_type
+        self.error_code = error_code
+
+
 def verify_device_request(admin_app):
     device_id = request.headers.get("X-AgroSmart-Device", "").replace(":", "").replace("-", "").lower()
     device_token = request.headers.get("X-AgroSmart-Token", "")
@@ -651,8 +658,18 @@ def verify_device_request(admin_app):
     if len(device_token) < 32 or len(device_token) > 128:
         return None
 
-    firestore = admin_firestore.client(app=admin_app)
-    device_query = firestore.collection_group("devices").where("deviceId", "==", device_id).limit(1).get()
+    try:
+        firestore = admin_firestore.client(app=admin_app)
+        device_query = firestore.collection_group("devices").where("deviceId", "==", device_id).limit(1).get()
+    except (GoogleAPICallError, firebase_admin.exceptions.FirebaseError) as error:
+        error_code = getattr(error, "code", "unknown")
+        error_code = getattr(error_code, "name", error_code)
+        if not isinstance(error_code, (str, int)):
+            error_code = "unknown"
+        error_type = type(error).__name__
+        print(f"[DEVICE LOOKUP ERROR] {error_type} (code={error_code})")
+        raise DeviceLookupError(error_type, error_code) from error
+
     if not device_query:
         return None
     device_ref = device_query[0].reference
@@ -883,7 +900,13 @@ def get_device_command():
     except RuntimeError as error:
         print(f"[DEVICE CONFIG ERROR] {error}")
         return jsonify({"error": "Device API is not configured."}), 503
-    verified = verify_device_request(admin_app)
+    try:
+        verified = verify_device_request(admin_app)
+    except DeviceLookupError as error:
+        return jsonify({
+            "error": "Device verification is temporarily unavailable.",
+            "diagnostic": f"{error.error_type}:{error.error_code}",
+        }), 503
     if not verified:
         return jsonify({"error": "Device is not paired or its credential is invalid."}), 401
     firestore, device_ref, device = verified
@@ -1044,7 +1067,13 @@ def receive_device_telemetry():
     except RuntimeError as error:
         print(f"[DEVICE CONFIG ERROR] {error}")
         return jsonify({"error": "Device API is not configured."}), 503
-    verified = verify_device_request(admin_app)
+    try:
+        verified = verify_device_request(admin_app)
+    except DeviceLookupError as error:
+        return jsonify({
+            "error": "Device verification is temporarily unavailable.",
+            "diagnostic": f"{error.error_type}:{error.error_code}",
+        }), 503
     if not verified:
         return jsonify({"error": "Device is not paired or its credential is invalid."}), 401
     data = request.get_json(silent=True)
