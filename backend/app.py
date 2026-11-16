@@ -1188,7 +1188,7 @@ def receive_device_telemetry():
 
         @admin_firestore.transactional
         def persist_telemetry(transaction):
-            device_snapshot = transaction.get(device_ref)
+            device_snapshot = device_ref.get(transaction=transaction)
             if not device_snapshot.exists:
                 raise RuntimeError("The paired device no longer exists.")
 
