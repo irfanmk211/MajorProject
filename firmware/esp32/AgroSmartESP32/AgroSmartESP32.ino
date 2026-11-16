@@ -503,7 +503,8 @@ void updateIrrigation() {
 
 void setup() {
   Serial.begin(115200);
-  // Write OFF level (HIGH for active-low) BEFORE setting OUTPUT mode to prevent power-on glitch
+  // Enable pull-up so floating state stays HIGH (OFF for active-low relay)
+  gpio_set_pull_mode((gpio_num_t)MOTOR_RELAY_PIN, GPIO_PULLUP_ONLY);
   digitalWrite(MOTOR_RELAY_PIN, RELAY_ON_LEVEL == LOW ? HIGH : LOW);
   pinMode(MOTOR_RELAY_PIN, OUTPUT);
   setMotor(false, true); // Ensure motor state tracking is false and pin is verified OFF
