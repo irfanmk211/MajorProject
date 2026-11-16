@@ -228,9 +228,11 @@ bool pairDevice(const String& pairingCode) {
 
   deviceToken = newToken;
   preferences.putString("deviceToken", deviceToken);
+  preferences.remove("pairingCode");
+  pendingPairingCode = "";
   lastCommandId = "";
   preferences.remove("lastCommandId");
-  Serial.println("Device paired to the selected farmer field.");
+  Serial.println("Device paired to the selected farmer field successfully!");
   return true;
 }
 
@@ -520,6 +522,7 @@ void setup() {
   preferences.begin("agrosmart", false);
   deviceToken = preferences.getString("deviceToken", "");
   lastCommandId = preferences.getString("lastCommandId", "");
+  pendingPairingCode = preferences.getString("pairingCode", "");
   configureTls();
 
   wifiManager.addParameter(&pairingCodeParameter);
@@ -540,22 +543,27 @@ void setup() {
   probeApiHealth();
 
   if (deviceToken.isEmpty()) {
-    if (strlen(pairingCodeParameter.getValue()) == 12) {
-      pendingPairingCode = String(pairingCodeParameter.getValue());
+    const char* enteredCode = pairingCodeParameter.getValue();
+    if (enteredCode && strlen(enteredCode) == 12) {
+      pendingPairingCode = String(enteredCode);
+      preferences.putString("pairingCode", pendingPairingCode);
+    }
+
+    if (pendingPairingCode.length() == 12) {
+      Serial.printf("Pairing code loaded (%s); proceeding to pair...\n", pendingPairingCode.c_str());
     } else {
-      Serial.println("Open the device setup AP and enter the pairing code.");
+      Serial.println("Device not paired yet. Open setup AP to enter 12-char pairing code.");
       wifiManager.setBreakAfterConfig(true);
       const bool portalConnected = wifiManager.startConfigPortal(DEVICE_AP_NAME);
-      pendingPairingCode = String(pairingCodeParameter.getValue());
-      if (!portalConnected) {
-        Serial.println("Setup saved, but Wi-Fi is not connected yet; pairing will wait for connectivity.");
-      }
-      if (pendingPairingCode.length() != 12) {
-        Serial.println("No valid pairing code was submitted in the setup portal.");
-      } else {
-        Serial.println("Pairing code received; waiting for secure connection.");
+      enteredCode = pairingCodeParameter.getValue();
+      if (enteredCode && strlen(enteredCode) == 12) {
+        pendingPairingCode = String(enteredCode);
+        preferences.putString("pairingCode", pendingPairingCode);
+        Serial.println("Pairing code saved! Proceeding to connect and pair.");
       }
     }
+  } else {
+    Serial.printf("Device already paired (Token: %s...). Portal skipped.\n", deviceToken.substring(0, 8).c_str());
   }
 
   attemptPairing();

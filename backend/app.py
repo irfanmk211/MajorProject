@@ -684,37 +684,42 @@ def verify_device_request(admin_app):
 
 
 def send_user_pushes(firestore, user_id, title, body, data):
-    tokens = firestore.collection("users", user_id, "notification_tokens").stream()
-    for token_doc in tokens:
-        token = token_doc.to_dict().get("token")
-        if not token:
-            continue
-        message = messaging.Message(
-            notification=messaging.Notification(title=title, body=body),
-            data={key: str(value) for key, value in data.items()},
-            token=token,
-            webpush=messaging.WebpushConfig(
-                notification=messaging.WebpushNotification(
-                    icon="/favicon.svg",
-                    data=data,
-                    actions=[
-                        {"action": "continue", "title": "Continue"},
-                        {"action": "stop", "title": "Stop"},
-                    ] if data.get("type") == "manual_timer_expired" else [],
+    try:
+        tokens = firestore.collection("users", user_id, "notification_tokens").stream()
+        for token_doc in tokens:
+            token = token_doc.to_dict().get("token")
+            if not token:
+                continue
+            actions = [
+                messaging.WebpushNotificationAction("continue", "Continue"),
+                messaging.WebpushNotificationAction("stop", "Stop"),
+            ] if data.get("type") == "manual_timer_expired" else None
+
+            message = messaging.Message(
+                notification=messaging.Notification(title=title, body=body),
+                data={key: str(value) for key, value in data.items()},
+                token=token,
+                webpush=messaging.WebpushConfig(
+                    notification=messaging.WebpushNotification(
+                        icon="/favicon.svg",
+                        data=data,
+                        actions=actions,
+                    ),
+                    fcm_options=messaging.WebpushFCMOptions(link="/irrigation"),
                 ),
-                fcm_options=messaging.WebpushFCMOptions(link="/irrigation"),
-            ),
-        )
-        try:
-            messaging.send(message, app=get_firebase_admin_app())
-        except messaging.UnregisteredError:
-            print(f"[PUSH INFO] Token expired or unregistered for user {user_id}. Cleaning up.")
+            )
             try:
-                token_doc.reference.delete()
-            except Exception:
-                pass
-        except firebase_admin.exceptions.FirebaseError as error:
-            print(f"[PUSH ERROR] Could not notify user {user_id}: {error}")
+                messaging.send(message, app=get_firebase_admin_app())
+            except messaging.UnregisteredError:
+                print(f"[PUSH INFO] Token expired or unregistered for user {user_id}. Cleaning up.")
+                try:
+                    token_doc.reference.delete()
+                except Exception:
+                    pass
+            except Exception as error:
+                print(f"[PUSH ERROR] Could not notify user {user_id}: {error}")
+    except Exception as outer_error:
+        print(f"[PUSH NOTIFICATIONS ERROR] {outer_error}")
 
 
 @app.route("/api/uploads/images", methods=["POST"])
@@ -872,7 +877,15 @@ def pair_device():
             if not pairing:
                 return None
             expires_at = pairing.get("expiresAt")
-            if not expires_at or expires_at <= datetime.now(timezone.utc):
+            if not expires_at:
+                transaction.delete(code_ref)
+                return None
+            now_utc = datetime.now(timezone.utc)
+            if hasattr(expires_at, "tzinfo") and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            elif isinstance(expires_at, (int, float)):
+                expires_at = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+            if expires_at <= now_utc:
                 transaction.delete(code_ref)
                 return None
 
@@ -906,6 +919,9 @@ def pair_device():
     except firebase_admin.exceptions.FirebaseError as error:
         print(f"[DEVICE PAIRING ERROR] {error}")
         return jsonify({"error": "Device pairing failed. Please generate a new code."}), 503
+    except Exception as error:
+        print(f"[DEVICE PAIRING UNEXPECTED ERROR] {error}")
+        return jsonify({"error": f"Pairing error: {str(error)}"}), 500
     if not claimed:
         return jsonify({"error": "Pairing code is invalid or expired. Generate a new code."}), 400
     return jsonify({"success": True, **claimed}), 201
@@ -1240,6 +1256,9 @@ def receive_device_telemetry():
         return jsonify({"error": "Could not save device telemetry."}), 503
     except RuntimeError as error:
         return jsonify({"error": str(error)}), 409
+    except Exception as error:
+        print(f"[DEVICE TELEMETRY UNEXPECTED ERROR] {error}")
+        return jsonify({"error": f"Telemetry error: {str(error)}"}), 500
     return jsonify({"success": True}), 201
 
 
