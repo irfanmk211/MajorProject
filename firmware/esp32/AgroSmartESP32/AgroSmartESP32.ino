@@ -111,7 +111,6 @@ int wifiReconnectAttempts = 0;
 String lastMoistureBand;
 bool lastReportedMotorOn = false;
 
-void setMotor(bool on, bool force = false);
 void handleUnpaired();
 
 void setMotor(bool on, bool force = false) {
