@@ -56,7 +56,9 @@ export default function SmartIrrigation() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(
+    () => typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted"
+  );
   const [unsubscribePush, setUnsubscribePush] = useState(null);
   const [now, setNow] = useState(0);
   const [optimisticPumpState, setOptimisticPumpState] = useState(null);
@@ -181,6 +183,25 @@ export default function SmartIrrigation() {
   };
 
   useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted" &&
+      user &&
+      !user.isGuest
+    ) {
+      registerPushNotifications()
+        .then((unsubscribe) => {
+          setUnsubscribePush(() => unsubscribe);
+          setPushEnabled(true);
+        })
+        .catch((pushError) => {
+          console.warn("Could not auto-register push notifications:", pushError);
+        });
+    }
+  }, [user]);
+
+  useEffect(() => {
     const handlePushMessage = (event) => {
       const notification = event.detail?.notification;
       if (notification?.body) setNotice(`${notification.title || "AgroSmart alert"}: ${notification.body}`);
@@ -270,8 +291,16 @@ export default function SmartIrrigation() {
               <Wifi size={16} /> {device ? "Manage devices" : "Open Devices"}
             </Link>
             <div id="notification-settings" tabIndex={-1} className="rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500">
-              <RippleButton onClick={enablePush} disabled={pushEnabled || busy || user?.isGuest} className="flex min-h-11 items-center gap-2">
-                <Bell size={16} /> {pushEnabled ? "Notifications enabled" : "Enable notifications"}
+              <RippleButton
+                onClick={enablePush}
+                disabled={pushEnabled || busy || user?.isGuest || (typeof window !== "undefined" && "Notification" in window && Notification.permission === "denied")}
+                className="flex min-h-11 items-center gap-2"
+              >
+                <Bell size={16} /> {pushEnabled
+                  ? "Notifications enabled"
+                  : (typeof window !== "undefined" && "Notification" in window && Notification.permission === "denied")
+                  ? "Notifications blocked"
+                  : "Enable notifications"}
               </RippleButton>
             </div>
           </div>

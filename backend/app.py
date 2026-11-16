@@ -707,6 +707,12 @@ def send_user_pushes(firestore, user_id, title, body, data):
         )
         try:
             messaging.send(message, app=get_firebase_admin_app())
+        except messaging.UnregisteredError:
+            print(f"[PUSH INFO] Token expired or unregistered for user {user_id}. Cleaning up.")
+            try:
+                token_doc.reference.delete()
+            except Exception:
+                pass
         except firebase_admin.exceptions.FirebaseError as error:
             print(f"[PUSH ERROR] Could not notify user {user_id}: {error}")
 
