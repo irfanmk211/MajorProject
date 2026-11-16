@@ -23,6 +23,8 @@ from google.api_core.exceptions import GoogleAPICallError
 from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 from PIL import Image
+from telemetry_average import AVERAGE_SAMPLE_COUNT, accumulate_periodic_sample
+from telemetry_triggers import get_telemetry_alerts
 
 try:
     from dotenv import load_dotenv
@@ -798,27 +800,33 @@ def create_device_pair_code():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "A JSON request body is required."}), 400
-    farm_id = data.get("farmId")
-    field_id = data.get("fieldId")
-    if not isinstance(farm_id, str) or not farm_id or not isinstance(field_id, str) or not field_id:
-        return jsonify({"error": "Select a farm and field before pairing."}), 400
-    if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in farm_id + field_id):
+    farm_id = data.get("farmId") or None
+    field_id = data.get("fieldId") or None
+    if (farm_id is None) != (field_id is None):
+        return jsonify({"error": "Choose both a farm and field, or leave both unassigned."}), 400
+    if farm_id is not None and (
+        not isinstance(farm_id, str)
+        or not isinstance(field_id, str)
+        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in farm_id + field_id)
+    ):
         return jsonify({"error": "The selected farm or field ID is invalid."}), 400
 
     try:
         firestore = admin_firestore.client(app=get_firebase_admin_app())
-        field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
-        if not field_ref.get().exists:
-            return jsonify({"error": "The selected field was not found in your account."}), 404
+        if farm_id is not None:
+            field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
+            if not field_ref.get().exists:
+                return jsonify({"error": "The selected field was not found in your account."}), 404
 
         code = secrets.token_urlsafe(9)
-        firestore.collection("device_pair_codes").document(code).set({
+        pairing_data = {
             "userId": user["uid"],
-            "farmId": farm_id,
-            "fieldId": field_id,
             "expiresAt": datetime.now(timezone.utc) + timedelta(minutes=10),
             "createdAt": admin_firestore.SERVER_TIMESTAMP,
-        })
+        }
+        if farm_id is not None:
+            pairing_data.update({"farmId": farm_id, "fieldId": field_id})
+        firestore.collection("device_pair_codes").document(code).set(pairing_data)
     except firebase_admin.exceptions.FirebaseError as error:
         print(f"[DEVICE PAIRING ERROR] {error}")
         return jsonify({"error": "Could not create a pairing code. Please try again."}), 503
@@ -864,17 +872,21 @@ def pair_device():
 
             user_id = pairing["userId"]
             device_ref = firestore.collection("users", user_id, "devices").document(device_id)
-            transaction.set(device_ref, {
+            device_data = {
                 "deviceId": device_id,
                 "name": f"Irrigation unit {device_id[-4:]}",
-                "farmId": pairing["farmId"],
-                "fieldId": pairing["fieldId"],
                 "mode": "manual",
                 "motorState": "off",
                 "tokenHash": hashlib.sha256(device_token.encode("utf-8")).hexdigest(),
                 "pairedAt": admin_firestore.SERVER_TIMESTAMP,
                 "lastSeenAt": admin_firestore.SERVER_TIMESTAMP,
-            })
+            }
+            if pairing.get("farmId") and pairing.get("fieldId"):
+                device_data.update({
+                    "farmId": pairing["farmId"],
+                    "fieldId": pairing["fieldId"],
+                })
+            transaction.set(device_ref, device_data)
             transaction.set(device_ref.collection("commands").document("current"), {
                 "commandId": secrets.token_hex(8),
                 "mode": "manual",
@@ -949,6 +961,7 @@ def set_device_command():
             return jsonify({"error": "Device not found in your account."}), 404
         device = device_snapshot.to_dict() or {}
         command = {"commandId": secrets.token_hex(8), "mode": mode}
+        device_patch = {"mode": mode}
         if action in {"start", "continue"}:
             if mode != "manual":
                 return jsonify({"error": "Manual motor runs require manual mode."}), 400
@@ -956,13 +969,23 @@ def set_device_command():
             if isinstance(duration, bool) or not isinstance(duration, int) or not 1 <= duration <= 1440:
                 return jsonify({"error": "Manual duration must be from 1 minute to 24 hours."}), 400
             command.update({"motor": "on", "durationMinutes": duration})
-            device_ref.update({"lastDurationMinutes": duration})
+            device_patch.update({
+                "lastDurationMinutes": duration,
+                "motorState": "on",
+                "motorStartedAt": admin_firestore.SERVER_TIMESTAMP,
+            })
         elif action == "stop":
             command["motor"] = "off"
+            device_patch.update({
+                "motorState": "off",
+                "motorStoppedAt": admin_firestore.SERVER_TIMESTAMP,
+            })
         else:
             command["motor"] = "auto" if mode == "automatic" else "off"
+            if mode == "manual":
+                device_patch.update({"motorState": "off"})
         command["updatedAt"] = admin_firestore.SERVER_TIMESTAMP
-        device_ref.update({"mode": mode})
+        device_ref.update(device_patch)
         device_ref.collection("commands").document("current").set(command)
     except firebase_admin.exceptions.FirebaseError as error:
         print(f"[DEVICE COMMAND ERROR] {error}")
@@ -983,19 +1006,25 @@ def update_device():
         return jsonify({"error": "A JSON request body is required."}), 400
     device_id = data.get("deviceId")
     name = data.get("name")
-    farm_id = data.get("farmId")
-    field_id = data.get("fieldId")
+    farm_id = data.get("farmId") or None
+    field_id = data.get("fieldId") or None
     if not isinstance(device_id, str) or len(device_id) != 12 or any(
         character not in "0123456789abcdef" for character in device_id.lower()
     ):
         return jsonify({"error": "A valid device ID is required."}), 400
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 64:
         return jsonify({"error": "Device name must be from 1 to 64 characters."}), 400
-    if not isinstance(farm_id, str) or not farm_id or not isinstance(field_id, str) or not field_id or any(
-        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-        for character in farm_id + field_id
+    if (farm_id is None) != (field_id is None):
+        return jsonify({"error": "Choose both a farm and field, or leave both unassigned."}), 400
+    if farm_id is not None and (
+        not isinstance(farm_id, str)
+        or not isinstance(field_id, str)
+        or any(
+            character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+            for character in farm_id + field_id
+        )
     ):
-        return jsonify({"error": "A valid farm and field are required."}), 400
+        return jsonify({"error": "The selected farm or field ID is invalid."}), 400
 
     try:
         firestore = admin_firestore.client(app=get_firebase_admin_app())
@@ -1006,15 +1035,21 @@ def update_device():
         device = device_snapshot.to_dict() or {}
         if device.get("motorState") == "on":
             return jsonify({"error": "Stop the motor before changing the device assignment."}), 409
-        field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
-        if not field_ref.get().exists:
-            return jsonify({"error": "The selected field was not found in your account."}), 404
-        device_ref.update({
+        patch = {
             "name": name.strip(),
-            "farmId": farm_id,
-            "fieldId": field_id,
             "updatedAt": admin_firestore.SERVER_TIMESTAMP,
-        })
+        }
+        if farm_id is None:
+            patch.update({
+                "farmId": admin_firestore.DELETE_FIELD,
+                "fieldId": admin_firestore.DELETE_FIELD,
+            })
+        else:
+            field_ref = firestore.document("users", user["uid"], "farms", farm_id, "fields", field_id)
+            if not field_ref.get().exists:
+                return jsonify({"error": "The selected field was not found in your account."}), 404
+            patch.update({"farmId": farm_id, "fieldId": field_id})
+        device_ref.update(patch)
     except RuntimeError as error:
         print(f"[DEVICE UPDATE CONFIG ERROR] {error}")
         return jsonify({"error": "Device management is not configured on the backend."}), 503
@@ -1115,52 +1150,90 @@ def receive_device_telemetry():
     event = data.get("event")
     if event not in {None, "manual_timer_expired"}:
         return jsonify({"error": "Unsupported telemetry event."}), 400
+    sample_type = data.get("sampleType", "event")
+    if sample_type not in {"periodic", "event"}:
+        return jsonify({"error": "sampleType must be 'periodic' or 'event'."}), 400
 
     firestore, device_ref, device = verified
     user_ref = device_ref.parent.parent
     user_id = user_ref.id
-    farm_id = device.get("farmId")
-    field_id = device.get("fieldId")
-    if not farm_id or not field_id:
-        return jsonify({"error": "Device has no assigned farm field."}), 409
-    field_ref = firestore.document("users", user_id, "farms", farm_id, "fields", field_id)
-    field_snapshot = field_ref.get()
-    if not field_snapshot.exists:
-        return jsonify({"error": "The assigned field no longer exists."}), 409
+    history_ref = device_ref.collection("readings").document()
+    received_at = datetime.now(timezone.utc)
 
     try:
-        field_ref.collection("readings").add(reading)
         moisture_band = "low" if reading["moisture"] < 30 else "high" if reading["moisture"] >= 60 else "normal"
-        previous_band = device.get("moistureBand")
-        patch = {
-            "lastSeenAt": admin_firestore.SERVER_TIMESTAMP,
-            "motorState": reading["motor"],
-            "mode": reading["mode"],
-            "latestReading": {**reading, "recordedAt": admin_firestore.SERVER_TIMESTAMP},
-            "moistureBand": moisture_band,
-        }
-        device_ref.update(patch)
+        transaction = firestore.transaction()
 
-        if event == "manual_timer_expired":
+        @admin_firestore.transactional
+        def persist_telemetry(transaction):
+            device_snapshot = transaction.get(device_ref)
+            if not device_snapshot.exists:
+                raise RuntimeError("The paired device no longer exists.")
+
+            current_device = device_snapshot.to_dict() or {}
+            previous_band = current_device.get("moistureBand")
+            previous_motor_state = current_device.get("motorState")
+            patch = {
+                "lastSeenAt": admin_firestore.SERVER_TIMESTAMP,
+                "motorState": reading["motor"],
+                "mode": reading["mode"],
+                "latestReading": {**reading, "recordedAt": admin_firestore.SERVER_TIMESTAMP},
+                "moistureBand": moisture_band,
+            }
+
+            if sample_type == "periodic":
+                window, averages = accumulate_periodic_sample(
+                    current_device.get("telemetryAverageWindow"),
+                    reading,
+                    received_at,
+                )
+                if averages is not None:
+                    average_reading = dict(averages)
+                    average_reading.update({
+                        "ldr": reading["ldr"],
+                        "source": "Irrigation device",
+                        "aggregation": "five-minute-average",
+                        "sampleCount": AVERAGE_SAMPLE_COUNT,
+                        "recordedAt": admin_firestore.SERVER_TIMESTAMP,
+                    })
+                    transaction.set(history_ref, average_reading)
+                patch["telemetryAverageWindow"] = window
+
+            if reading.get("mode") == "automatic" and reading.get("moisture", 0) >= 60 and reading.get("motor") == "on":
+                patch["motorState"] = "off"
+                stop_cmd = {
+                    "commandId": secrets.token_hex(8),
+                    "mode": "automatic",
+                    "motor": "off",
+                    "reason": "auto_moisture_cutoff",
+                    "updatedAt": admin_firestore.SERVER_TIMESTAMP,
+                }
+                transaction.set(device_ref.collection("commands").document("current"), stop_cmd)
+
+            transaction.update(device_ref, patch)
+            return previous_band, previous_motor_state
+
+        previous_band, previous_motor_state = persist_telemetry(transaction)
+
+        for alert in get_telemetry_alerts(
+            previous_band,
+            previous_motor_state,
+            moisture_band,
+            reading["motor"],
+            event,
+        ):
             send_user_pushes(
-                firestore, user_id, "Manual watering timer ended",
-                "The motor was stopped. Open AgroSmart to continue for the previous duration or leave it stopped.",
-                {"type": "manual_timer_expired", "deviceId": device_ref.id, "url": "/irrigation"},
-            )
-        elif moisture_band != previous_band and moisture_band in {"low", "high"}:
-            if moisture_band == "low":
-                body = "Soil moisture is below 30%. Start the motor manually or review automatic mode."
-            elif reading["mode"] == "automatic":
-                body = "Soil moisture reached 60%. Automatic mode should stop the motor."
-            else:
-                body = "Soil moisture is above 60%. Consider stopping the motor."
-            send_user_pushes(
-                firestore, user_id, "Soil moisture alert", body,
-                {"type": f"moisture_{moisture_band}", "deviceId": device_ref.id, "url": "/irrigation"},
+                firestore,
+                user_id,
+                alert["title"],
+                alert["body"],
+                {"type": alert["type"], "deviceId": device_ref.id, "url": "/irrigation"},
             )
     except firebase_admin.exceptions.FirebaseError as error:
         print(f"[DEVICE TELEMETRY ERROR] {error}")
         return jsonify({"error": "Could not save device telemetry."}), 503
+    except RuntimeError as error:
+        return jsonify({"error": str(error)}), 409
     return jsonify({"success": True}), 201
 
 

@@ -3,7 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Mic, MicOff, Volume2, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/languageState";
-import { API_BASE_URL, ESP32_IP } from "../config";
+import { API_BASE_URL } from "../config";
+import {
+  getActiveUserDevice,
+  isDeviceReadingFresh,
+  saveCropPredictionHistory,
+  sendDeviceCommand,
+} from "../services/farmerData";
 
 const pages = [
   { path: "/dashboard", label: "ಮುಖಪುಟ", terms: ["ಮುಖಪುಟ", "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್", "home", "dashboard"] },
@@ -36,7 +42,7 @@ const englishFieldLabels = {
   temperature: "temperature",
   humidity: "humidity",
   ph: "soil pH",
-  rainfall: "annual rainfall",
+  rainfall: "rainfall",
 };
 
 function pageOpeningMessage(page, language, continuation = false) {
@@ -57,13 +63,13 @@ function getVoiceForLanguage(voices, languageCode) {
 }
 
 const cropFields = [
-  { name: "N", label: "ಸಾರಜನಕ (N)", aliases: String.raw`\bn\b|nitrogen|ಸಾರಜನಕ|ಎನ್`, min: 0, max: 140, unit: "ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್" },
-  { name: "P", label: "ರಂಜಕ (P)", aliases: String.raw`\bp\b|phosphorus|phosphorous|ರಂಜಕ|ಫಾಸ್ಫರಸ್|ಪಿ`, min: 0, max: 145, unit: "ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್" },
-  { name: "K", label: "ಪೊಟ್ಯಾಸಿಯಂ (K)", aliases: String.raw`\bk\b|potassium|ಪೊಟ್ಯಾಸಿಯಂ|ಕೆ`, min: 0, max: 205, unit: "ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್" },
+  { name: "N", label: "ಸಾರಜನಕ (N)", aliases: String.raw`\bn\b|nitrogen|ಸಾರಜನಕ|ಎನ್`, min: 0, max: 140, unit: "mg/kg" },
+  { name: "P", label: "ರಂಜಕ (P)", aliases: String.raw`\bp\b|phosphorus|phosphorous|ರಂಜಕ|ಫಾಸ್ಫರಸ್|ಪಿ`, min: 0, max: 145, unit: "mg/kg" },
+  { name: "K", label: "ಪೊಟ್ಯಾಸಿಯಂ (K)", aliases: String.raw`\bk\b|potassium|ಪೊಟ್ಯಾಸಿಯಂ|ಕೆ`, min: 0, max: 205, unit: "mg/kg" },
   { name: "temperature", label: "ತಾಪಮಾನ", aliases: String.raw`temperature|temp|ತಾಪಮಾನ`, min: 8, max: 44, unit: "ಡಿಗ್ರಿ ಸೆಲ್ಸಿಯಸ್" },
   { name: "humidity", label: "ತೇವಾಂಶ", aliases: String.raw`humidity|ಆರ್ದ್ರತೆ|ತೇವಾಂಶ`, min: 14, max: 100, unit: "ಶೇಕಡಾ" },
   { name: "ph", label: "ಮಣ್ಣಿನ pH", aliases: String.raw`\bph\b|ಪಿಎಚ್|ಪಿಹೆಚ್`, min: 3.5, max: 10, unit: "" },
-  { name: "rainfall", label: "ವಾರ್ಷಿಕ ಮಳೆ", aliases: String.raw`rainfall|rain|ಮಳೆ|ವರ್ಷ`, min: 20, max: 300, unit: "ಮಿಲಿಮೀಟರ್" },
+  { name: "rainfall", label: "ಮಳೆ", aliases: String.raw`rainfall|rain|ಮಳೆ|ವರ್ಷ`, min: 20, max: 300, unit: "ಮಿಲಿಮೀಟರ್" },
 ];
 
 const cropValueKey = "agrosmart_voice_crop_values";
@@ -299,21 +305,21 @@ export default function VoiceAssistant() {
     if (!flow || flow.waitingForPage) return;
     const field = cropFields[flow.index];
     const questions = isKannada ? {
-      N: "ಮೊದಲು ಮಣ್ಣಿನ ಸಾರಜನಕ, ಅಂದರೆ N ಪ್ರಮಾಣವನ್ನು ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 140 ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
-      P: "ಧನ್ಯವಾದಗಳು. ಈಗ ಮಣ್ಣಿನ ರಂಜಕ, ಅಂದರೆ P ಪ್ರಮಾಣವನ್ನು ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 145 ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
-      K: "ಸರಿ. ಈಗ ಪೊಟ್ಯಾಸಿಯಂ, ಅಂದರೆ K ಪ್ರಮಾಣವನ್ನು ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 205 ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+      N: "ಮೊದಲು ಮಣ್ಣಿನ ಸಾರಜನಕ, ಅಂದರೆ N ಪ್ರಮಾಣವನ್ನು mg/kg ನಲ್ಲಿ ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 140ರ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+      P: "ಧನ್ಯವಾದಗಳು. ಈಗ ಮಣ್ಣಿನ ರಂಜಕ, ಅಂದರೆ P ಪ್ರಮಾಣವನ್ನು mg/kg ನಲ್ಲಿ ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 145ರ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+      K: "ಸರಿ. ಈಗ ಪೊಟ್ಯಾಸಿಯಂ, ಅಂದರೆ K ಪ್ರಮಾಣವನ್ನು mg/kg ನಲ್ಲಿ ಹೇಳಿ. ಶೂನ್ಯದಿಂದ 205ರ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
       temperature: "ಈಗ ಹೊಲದ ತಾಪಮಾನವನ್ನು ಡಿಗ್ರಿ ಸೆಲ್ಸಿಯಸ್‌ನಲ್ಲಿ ಹೇಳಿ. 8ರಿಂದ 44ರ ನಡುವಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
       humidity: "ಈಗ ಗಾಳಿಯ ತೇವಾಂಶವನ್ನು ಶೇಕಡಾವಾರು ಹೇಳಿ. 14ರಿಂದ 100ರ ನಡುವಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
       ph: "ಈಗ ಮಣ್ಣಿನ pH ಮೌಲ್ಯವನ್ನು ಹೇಳಿ. 3.5ರಿಂದ 10ರ ನಡುವಿನ ಮೌಲ್ಯವನ್ನು ಹೇಳಿ. ಉದಾಹರಣೆಗೆ, ಆರು ಪಾಯಿಂಟ್ ಐದು.",
-      rainfall: "ಕೊನೆಯದಾಗಿ, ವಾರ್ಷಿಕ ಮಳೆಯ ಪ್ರಮಾಣವನ್ನು ಮಿಲಿಮೀಟರ್‌ನಲ್ಲಿ ಹೇಳಿ. 20ರಿಂದ 300ರ ನಡುವಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+      rainfall: "ಕೊನೆಯದಾಗಿ, ಮಳೆಯ ಮೌಲ್ಯವನ್ನು ಮಿಲಿಮೀಟರ್‌ನಲ್ಲಿ ಹೇಳಿ. 20ರಿಂದ 300ರ ನಡುವಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
     } : {
-      N: "First, say the soil nitrogen (N) value, from 0 to 140 kilograms per hectare.",
-      P: "Thanks. Now say the soil phosphorus (P) value, from 0 to 145 kilograms per hectare.",
-      K: "Now say the potassium (K) value, from 0 to 205 kilograms per hectare.",
+      N: "First, say the soil nitrogen (N) value in milligrams per kilogram, from 0 to 140.",
+      P: "Thanks. Now say the soil phosphorus (P) value in milligrams per kilogram, from 0 to 145.",
+      K: "Now say the potassium (K) value in milligrams per kilogram, from 0 to 205.",
       temperature: "Say the field temperature in degrees Celsius, from 8 to 44.",
       humidity: "Say the air humidity percentage, from 14 to 100.",
       ph: "Say the soil pH value, from 3.5 to 10. For example, six point five.",
-      rainfall: "Finally, say the annual rainfall in millimeters, from 20 to 300.",
+      rainfall: "Finally, say the rainfall value in millimeters, from 20 to 300.",
     };
     if (field) announce(questions[field.name]);
   };
@@ -385,21 +391,21 @@ export default function VoiceAssistant() {
       };
       const labels = isKannada ? {
         N: "ಸಾರಜನಕ (N)", P: "ರಂಜಕ (P)", K: "ಪೊಟ್ಯಾಸಿಯಂ (K)",
-        temperature: "ತಾಪಮಾನ", humidity: "ತೇವಾಂಶ", ph: "pH", rainfall: "ವಾರ್ಷಿಕ ಮಳೆ",
+        temperature: "ತಾಪಮಾನ", humidity: "ತೇವಾಂಶ", ph: "pH", rainfall: "ಮಳೆ",
       } : {
         N: "nitrogen (N)", P: "phosphorus (P)", K: "potassium (K)",
-        temperature: "temperature", humidity: "humidity", ph: "soil pH", rainfall: "annual rainfall",
+        temperature: "temperature", humidity: "humidity", ph: "soil pH", rainfall: "rainfall",
       };
       const prompts = isKannada ? {
-        P: "ಶೂನ್ಯದಿಂದ 145 ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
-        K: "ಶೂನ್ಯದಿಂದ 205 ಕಿಲೋಗ್ರಾಂ ಪ್ರತಿ ಹೆಕ್ಟೇರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+        P: "ಶೂನ್ಯದಿಂದ 145 mg/kg ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
+        K: "ಶೂನ್ಯದಿಂದ 205 mg/kg ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
         temperature: "8ರಿಂದ 44 ಡಿಗ್ರಿ ಸೆಲ್ಸಿಯಸ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
         humidity: "14ರಿಂದ 100 ಶೇಕಡಾ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
         ph: "3.5ರಿಂದ 10ರ ನಡುವಿನ ಮೌಲ್ಯವನ್ನು ಹೇಳಿ.",
         rainfall: "20ರಿಂದ 300 ಮಿಲಿಮೀಟರ್ ಒಳಗಿನ ಸಂಖ್ಯೆಯನ್ನು ಹೇಳಿ.",
       } : {
-        P: "Say a number from 0 to 145 kilograms per hectare.",
-        K: "Say a number from 0 to 205 kilograms per hectare.",
+        P: "Say a number from 0 to 145 milligrams per kilogram.",
+        K: "Say a number from 0 to 205 milligrams per kilogram.",
         temperature: "Say a number from 8 to 44 degrees Celsius.",
         humidity: "Say a percentage from 14 to 100.",
         ph: "Say a value from 3.5 to 10.",
@@ -430,49 +436,42 @@ export default function VoiceAssistant() {
 
   const executePumpCommand = async (state) => {
     try {
-      const sensorResponse = await fetch(`http://${ESP32_IP}/api/data`);
-      if (!sensorResponse.ok) throw new Error("ಸಾಧನ ಸಂಪರ್ಕವಾಗಲಿಲ್ಲ.");
-      const sensorData = await sensorResponse.json();
-      const hasSensorData = [sensorData.soil_moisture_percent, sensorData.soil_moisture, sensorData.soil]
-        .some((value) => value !== undefined && value !== null);
-      if (state === 1 && !hasSensorData) {
+      const device = await getActiveUserDevice(user.uid);
+      const lastSeen = device?.lastSeenAt?.toDate?.();
+      if (!device || !lastSeen || Date.now() - lastSeen.getTime() >= 150_000
+          || !isDeviceReadingFresh(device, Date.now())) {
         announce(isKannada
-          ? "ಮಣ್ಣಿನ ಸಂವೇದಕದ ಮಾಹಿತಿ ಸಿಗದ ಕಾರಣ ಮೋಟಾರ್ ಚಾಲು ಮಾಡಲಿಲ್ಲ. ಸಾಧನದ ಸಂಪರ್ಕವನ್ನು ಪರಿಶೀಲಿಸಿ."
-          : "The motor was not started because soil sensor data is unavailable. Check the device connection.");
+          ? "ಜೋಡಿಸಿದ ನೀರಾವರಿ ಸಾಧನ ಸಂಪರ್ಕದಲ್ಲಿಲ್ಲ. ನೀರಾವರಿ ಪುಟದಲ್ಲಿ ಅದರ ಸ್ಥಿತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ."
+          : "The paired irrigation device is offline. Check its status on the Irrigation page.");
         return;
       }
-      const response = await fetch(`http://${ESP32_IP}/api/pump?state=${state}`);
-      if (!response.ok) throw new Error("ಮೋಟಾರ್ ಆದೇಶವನ್ನು ಸಾಧನ ಸ್ವೀಕರಿಸಲಿಲ್ಲ.");
-      const result = await response.json();
-      if (result.pump_state !== undefined && result.pump_state !== state) {
-        throw new Error("ಮೋಟಾರ್ ಸ್ಥಿತಿಯನ್ನು ಖಚಿತಪಡಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.");
-      }
-      if (location.pathname === "/irrigation") {
-        window.dispatchEvent(new Event("agrosmart:voice-manual-mode"));
-      }
+      await sendDeviceCommand(device.id, state ? "start" : "stop", "manual", state ? 60 : undefined);
       announce(isKannada
         ? state
-          ? "ನೀರಾವರಿ ಪುಟ ತೆರೆದಿದೆ. ಮೋಟಾರ್ ಚಾಲು ಮಾಡುವ ಆದೇಶ ಕಳುಹಿಸಿದ್ದೇನೆ. ಅದರ ಸ್ಥಿತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ."
+          ? "ನೀರಾವರಿ ಪುಟ ತೆರೆದಿದೆ. ಮೋಟಾರ್‌ಗೆ ಒಂದು ಗಂಟೆಯ ಕೈಚಾಲಿತ ಆದೇಶ ಕಳುಹಿಸಿದ್ದೇನೆ. ಅದರ ಸ್ಥಿತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ."
           : "ನೀರಾವರಿ ಪುಟ ತೆರೆದಿದೆ. ಮೋಟಾರ್ ನಿಲ್ಲಿಸುವ ಆದೇಶ ಕಳುಹಿಸಿದ್ದೇನೆ. ಅದರ ಸ್ಥಿತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ."
         : state
-          ? "The Irrigation page is open. I sent the command to start the motor. Check its status."
+          ? "The Irrigation page is open. I sent a one-hour manual start command. Check its status."
           : "The Irrigation page is open. I sent the command to stop the motor. Check its status.");
     } catch {
       announce(isKannada
-        ? "ಮೋಟಾರ್‌ಗೆ ಆದೇಶ ಕಳುಹಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ESP32 ಸಾಧನದ ಸಂಪರ್ಕವನ್ನು ಪರಿಶೀಲಿಸಿ."
-        : "I couldn't send the motor command. Check the ESP32 device connection.");
+        ? "ಮೋಟಾರ್‌ಗೆ ಆದೇಶ ಕಳುಹಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ನೀರಾವರಿ ಸಾಧನದ ಸಂಪರ್ಕವನ್ನು ಪರಿಶೀಲಿಸಿ."
+        : "I couldn't send the motor command. Check the irrigation device connection.");
     }
   };
 
   const readSoilTask = async () => {
     try {
-      const response = await fetch(`http://${ESP32_IP}/api/data`);
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      let moisture = data.soil_moisture_percent ?? data.soil_moisture ?? data.soil;
-      if (moisture !== undefined && moisture > 100) {
-        moisture = Math.max(0, Math.min(100, Math.round(((3500 - moisture) / 2000) * 100)));
+      const device = await getActiveUserDevice(user.uid);
+      if (!isDeviceReadingFresh(device, Date.now())) {
+        announce(isKannada
+          ? "ಸಾಧನ ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದೆ. ನೇರ ಸಂವೇದಕ ಮೌಲ್ಯಗಳು ಲಭ್ಯವಿಲ್ಲ."
+          : "The device is offline. Live sensor values are unavailable.");
+        return;
       }
+      const data = device?.latestReading;
+      if (!data) throw new Error("No saved device telemetry.");
+      const moisture = data.moisture;
       const details = [];
       if (moisture !== undefined && moisture !== null) {
         details.push(isKannada
@@ -495,30 +494,28 @@ export default function VoiceAssistant() {
         : `Soil monitoring report: ${details.join(", ")}.`);
     } catch {
       announce(isKannada
-        ? "ಮಣ್ಣಿನ ಸಂವೇದಕದ ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ. ESP32 ಸಾಧನದ ವಿದ್ಯುತ್, Wi-Fi ಮತ್ತು ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ."
-        : "Soil sensor data is unavailable. Check the ESP32 power, Wi-Fi, and connection.");
+        ? "ಮಣ್ಣಿನ ಸಂವೇದಕದ ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ. ಸಾಧನದ ವಿದ್ಯುತ್ ಮತ್ತು Wi-Fi ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ."
+        : "Soil sensor data is unavailable. Check the device power and Wi-Fi connection.");
     }
   };
 
   const readIrrigationTask = async () => {
     try {
-      const response = await fetch(`http://${ESP32_IP}/api/data`);
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      const pumpState = data.pump_state ?? data.irrigation;
-      const pumpDescription = pumpState === 1 || pumpState === "ON" || pumpState === true
+      const device = await getActiveUserDevice(user.uid);
+      if (!isDeviceReadingFresh(device, Date.now())) throw new Error("Device is offline.");
+      const pumpDescription = device.motorState === "on"
         ? isKannada ? "ಮೋಟಾರ್ ಚಾಲನೆಯಲ್ಲಿದೆ" : "The motor is running"
-        : pumpState === 0 || pumpState === "OFF" || pumpState === false
+        : device.motorState === "off"
           ? isKannada ? "ಮೋಟಾರ್ ನಿಂತಿದೆ" : "The motor is stopped"
           : isKannada ? "ಮೋಟಾರ್ ಸ್ಥಿತಿ ಲಭ್ಯವಿಲ್ಲ" : "Motor status is unavailable";
-      const moisture = data.soil_moisture_percent ?? data.soil_moisture ?? data.soil;
+      const moisture = device.latestReading?.moisture;
       announce(isKannada
         ? `ನೀರಾವರಿ ಸ್ಥಿತಿ: ${pumpDescription}.${moisture !== undefined ? ` ಮಣ್ಣಿನ ತೇವಾಂಶ ${Math.round(moisture)} ಶೇಕಡಾ.` : ""}`
         : `Irrigation status: ${pumpDescription}.${moisture !== undefined ? ` Soil moisture ${Math.round(moisture)} percent.` : ""}`);
     } catch {
       announce(isKannada
-        ? "ನೀರಾವರಿ ಸಾಧನದಿಂದ ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ. ESP32 ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ."
-        : "I couldn't get irrigation data. Check the ESP32 connection.");
+        ? "ನೀರಾವರಿ ಸಾಧನದಿಂದ ಮಾಹಿತಿ ಸಿಗಲಿಲ್ಲ. ಅದರ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ."
+        : "I couldn't get irrigation data. Check the device connection.");
     }
   };
 
@@ -603,12 +600,19 @@ export default function VoiceAssistant() {
         throw new Error(payload.error || "ಬೆಳೆಗಳ ಶಿಫಾರಸು ಸಿಗಲಿಲ್ಲ.");
       }
       saveCropRequest(values, result);
+      let historySaved = true;
+      try {
+        await saveCropPredictionHistory(values, result);
+      } catch (historySaveError) {
+        historySaved = false;
+        console.error("Could not save voice crop prediction history:", historySaveError);
+      }
       const recommendations = result.slice(0, 3).map((item, index) => isKannada
         ? `${index + 1}. ${speakCropName(item.crop)}, ${item.prob} ಶೇಕಡಾ`
         : `${index + 1}. ${String(item.crop).replaceAll("_", " ")}, ${item.prob} percent`).join(". ");
       announce(isKannada
-        ? `ನಿಮ್ಮ ಹೊಲಕ್ಕೆ ಸೂಕ್ತವಾದ ಬೆಳೆಗಳ ಅಂದಾಜು ಸಿದ್ಧವಾಗಿದೆ. ${recommendations}. ವಿವರಗಳನ್ನು ಬೆಳೆ ಶಿಫಾರಸು ಪುಟದಲ್ಲಿ ತೋರಿಸಿದ್ದೇನೆ.`
-        : `Crop recommendations for your farm are ready. ${recommendations}. The details are shown on the Crop Recommendation page.`);
+        ? `ನಿಮ್ಮ ಹೊಲಕ್ಕೆ ಸೂಕ್ತವಾದ ಬೆಳೆಗಳ ಅಂದಾಜು ಸಿದ್ಧವಾಗಿದೆ. ${recommendations}. ${historySaved ? "ಇತಿಹಾಸಕ್ಕೆ ಉಳಿಸಲಾಗಿದೆ." : "ಆದರೆ ಇತಿಹಾಸಕ್ಕೆ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ."} ವಿವರಗಳನ್ನು ಬೆಳೆ ಶಿಫಾರಸು ಪುಟದಲ್ಲಿ ತೋರಿಸಿದ್ದೇನೆ.`
+        : `Crop recommendations for your farm are ready. ${recommendations}. ${historySaved ? "The result was saved to history." : "The result could not be saved to history."} The details are shown on the Crop Recommendation page.`);
     } catch {
       saveCropRequest(values);
       announce(isKannada

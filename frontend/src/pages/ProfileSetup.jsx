@@ -12,7 +12,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { SUPPORTED_LANGUAGES, useLanguage } from "../context/languageState";
 import { districtsByState, states, taluksByStateAndDistrict } from "../data/stateLocations";
-import { listFarms, saveFarm, saveProfilePhoto } from "../services/farmerData";
+import { listFarms, saveFarm, uploadImage } from "../services/farmerData";
 
 const emptyProfile = {
   preferredLanguage: "en",
@@ -125,8 +125,7 @@ function ProfileSetupForm({ user, profileComplete, authEnabled }) {
     setSuccess("");
     setSaving(true);
     try {
-      let photoURL = user.photoURL || "";
-      if (photo) photoURL = await saveProfilePhoto(user.uid, photo);
+      const photoURL = photo ? await uploadImage(photo, "profile") : user.photoURL || "";
       const saved = await saveProfile({ ...form, photoURL });
       const farms = await listFarms(user.uid);
       const defaultFarm = {

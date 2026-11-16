@@ -14,7 +14,6 @@ AgroSmart-main/
 ├── .gitignore
 ├── firebase.json
 ├── firestore.rules
-├── storage.rules
 ├── README.md
 ├── FIREBASE_SETUP.md
 ├── QUICK_START.md
@@ -32,6 +31,9 @@ AgroSmart-main/
 │   ├── best_head.weights.h5
 │   ├── class_names.json
 │   └── class_names.txt
+├── firmware/
+│   ├── README.md
+│   └── esp32/AgroSmartESP32.ino
 ├── data/
 │   ├── README.md
 │   ├── final/.gitkeep
@@ -55,6 +57,7 @@ AgroSmart-main/
 │   │   ├── background.png
 │   │   ├── favicon.svg
 │   │   ├── icons.svg
+│   │   ├── firebase-messaging-sw.js
 │   │   └── images/placeholder-crop.svg
 │   └── src/
 │       ├── .gitignore
@@ -112,7 +115,8 @@ AgroSmart-main/
 │       │   ├── Weather.jsx
 │       │   └── soilirrigation.jsx
 │       └── services/
-│           └── farmerData.js
+│           ├── farmerData.js
+│           └── pushNotifications.js
 ├── src/
 │   ├── __init__.py
 │   ├── data_collection/__init__.py
@@ -136,11 +140,13 @@ AgroSmart-main/
 
 - `frontend/src/App.jsx` defines the React routes and wraps them in the theme, language, authentication, and router providers.
 - `frontend/src/pages/` contains the routed screens. `soilirrigation.jsx` is a legacy, currently unrouted module.
-- `frontend/src/services/farmerData.js` centralizes Firestore and localStorage persistence for profiles, farms, fields, photos, and sensor readings.
+- `frontend/src/services/farmerData.js` centralizes Firestore/localStorage operations, device API calls, and linked-device subscriptions.
 - `frontend/src/data/` contains disease advisory material, crop image mappings, location selections, and Kannada location translations.
-- `frontend/src/config.js` provides frontend service/device configuration. Its private device address is not included here.
-- `frontend/src/firebase.js` initializes Firebase Auth, Firestore, and Storage. Configuration values are deliberately omitted from this document.
+- `frontend/src/config.js` provides the Flask API base URL.
+- `frontend/src/firebase.js` initializes Firebase Auth and Firestore for the `agrosmart-mp` project. Configuration values are deliberately omitted from this document.
+- `frontend/public/firebase-messaging-sw.js` handles background Firebase web-push notifications and timer actions.
 - `backend/app.py` is the Flask application, model loader, and API implementation.
+- `firmware/esp32/AgroSmartESP32.ino` is a configurable, hardware-unverified ESP32 starter.
 - `backend/*.keras`, `*.h5`, and `*.pkl` are prebuilt model artifacts; this documentation does not load or inspect pickle contents.
 - `training/` contains plant-disease model training, dataset loading, and evaluation scripts.
 - `data/` documents intended dataset categories. The checked-in data subfolders contain `.gitkeep` placeholders, not actual training datasets.
@@ -163,11 +169,12 @@ Provider order in `App.jsx` is `ThemeProvider` → `LanguageProvider` → `AuthP
 | `/profile-setup` | `ProfileSetup` | Collects profile/location/farm details, optionally uploads a profile photo, saves profile and creates or updates the first farm. |
 | `/dashboard` | `Dashboard` | Links to modules and profile/farm management; no direct API request. |
 | `/farms` | `FarmFields` | Lists/adds/edits farms and fields via `farmerData.js`; uploads field photos and selects an active field. |
-| `/crop` | `Crop` | Sends seven inputs to Flask `POST /predict-crop`; shows up to five recommendations. |
+| `/devices` | `Devices` | Lists and selects devices, generates pairing codes, and edits optional farm/field assignments. |
+| `/crop` | `Crop` | Sends seven inputs to Flask `POST /predict-crop`, stores ranked results in Firestore, and provides owner-scoped prediction history with editable notes and deletion. |
 | `/disease` | `Disease` | Uploads a leaf image to Flask `POST /api/predict`; displays model result and local advisory details. |
-| `/soil` | `SoilMonitoring` | Polls the ESP32 `/api/data` endpoint every five seconds; attempts to save readings for the active field. |
-| `/irrigation` | `SmartIrrigation` | Polls ESP32 readings and sends pump commands directly to the device. |
-| `/weather` | `Weather` | Requests a seven-day forecast from Open-Meteo and separately polls ESP32 local readings. |
+| `/soil` | `SoilMonitoring` | Subscribes to the selected device's latest readings and device-specific history in Firestore. |
+| `/irrigation` | `SmartIrrigation` | Displays selected-device telemetry and history, sends authenticated manual/automatic commands, and enables push notifications. |
+| `/weather` | `Weather` | Requests a seven-day forecast from Open-Meteo and reads the selected device's latest telemetry from Firestore. |
 | `/profile` | `Profile` | Displays profile values and offers theme/language controls. The crops input and “Save Changes” control do not call a profile persistence function in this page. |
 | `/about` | `About` | Descriptive project/help information; no direct API request. |
 | `/contact` | `Contact` | Contact form shows a local temporary success state; it does not submit to a backend. Embeds a Google Maps iframe. |
@@ -191,25 +198,25 @@ Provider order in `App.jsx` is `ThemeProvider` → `LanguageProvider` → `AuthP
 
 ### Firebase integration
 
-`firebase.js` initializes the Firebase application and exports Auth, Firestore, and Storage clients. Its Firebase configuration is declared in source; the values are intentionally not reproduced. A frontend `.env.example` contains placeholder variables, but `firebase.js` uses its in-file configuration rather than reading those placeholders. `firebase.json` points deployment to the Firestore and Storage rules.
+`firebase.js` initializes the Firebase application and exports Auth and Firestore clients. The web configuration defaults to the `agrosmart-mp` Firebase project and can be overridden with the frontend environment variables. `firebase.json` configures Hosting and Firestore rules only; Firebase Storage is not used.
 
-`firebaseTest.js` is a Firebase test/helper source file. Farmer-data operations are described in Section 4. Owner checks in `firestore.rules` restrict user data to the authenticated owner. Storage rules restrict uploads to owner paths, image content types, and files smaller than 5 MB.
+`firebaseTest.js` is a Firebase test/helper source file. Farmer-data operations are described in Section 4. Owner checks in `firestore.rules` restrict user data to the authenticated owner. Configure the Email/Password sign-in provider in the Firebase console; it is not deployed with Firebase CLI.
 
 ### Frontend API/service calls
 
 | Page/module | Calls |
 |---|---|
 | Login/Profile setup | Firebase Auth and Firestore via `AuthContext` and `farmerData.js`, when Firebase is configured. |
-| Farms & Fields | Firestore/localStorage service functions; Firebase Storage for field photo upload. |
+| Farms & Fields | Firestore/localStorage service functions. |
 | Crop | `POST {API_BASE_URL}/predict-crop` with JSON. |
 | Disease | `POST http://127.0.0.1:5000/api/predict` with multipart field `image` (the URL is hard-coded on this page). |
-| Soil monitoring | `GET http://{ESP32}/api/data` every 5 seconds; may persist a throttled reading. |
-| Irrigation | `GET http://{ESP32}/api/data` every 5 seconds; `GET http://{ESP32}/api/pump?state=0|1` for pump control; may persist a throttled reading. |
-| Weather | `GET https://api.open-meteo.com/v1/forecast` and `GET http://{ESP32}/api/data` every 5 seconds. |
-| Voice assistant | TTS, crop prediction, Open-Meteo, ESP32 sensor read and pump-control calls; also uses browser speech APIs. |
+| Soil monitoring | Live Firestore subscription to the selected device and its history. |
+| Irrigation | Authenticated Render API pairing/control calls, live Firestore device subscription, and Firebase Cloud Messaging registration. |
+| Weather | `GET https://api.open-meteo.com/v1/forecast` plus live Firestore subscription to the selected device. |
+| Voice assistant | TTS, crop prediction, Open-Meteo, Firestore telemetry reads and authenticated Render motor commands; also uses browser speech APIs. |
 | Contact | External Google Maps embed only; form submission is local UI state. |
 
-The device address is configurable in source, but it is omitted here. The disease page's API URL is not derived from `API_BASE_URL`, unlike the Crop page.
+The ESP32 no longer exposes a browser-accessible local HTTP control endpoint. Disease and crop API requests use the configured Flask API base URL.
 
 ## 3. Backend Architecture
 
@@ -233,6 +240,13 @@ No SQL or other persistent database connection is implemented in this Flask modu
 | `POST /predict-disease` | Same multipart image field | Legacy alias that invokes the same disease prediction handler. |
 | `POST /sensor` | JSON sensor data | Stores the submitted JSON in process memory and returns `{ "success": true, "message": "...", "data": ... }`. |
 | `GET /get_sensor` | None | Returns the current in-memory sensor JSON. |
+| `POST /api/devices/pair-codes` | Authenticated JSON with optional `{ "farmId", "fieldId" }` | Creates a single-use pairing code that expires after ten minutes. |
+| `POST /api/devices/pair` | ESP32 JSON `{ "pairingCode", "deviceId", "deviceToken" }` | Claims the pairing code transactionally and saves the hashed device credential. |
+| `GET /api/devices/command` | ESP32 device ID/token headers | Returns the latest manual/automatic command. |
+| `POST /api/devices/command` | Authenticated JSON `{ "deviceId", "action", "mode", "durationMinutes?" }` | Stores a device command; manual duration is limited to 1–1,440 minutes. |
+| `POST /api/devices/update` | Authenticated JSON `{ "deviceId", "name", "farmId", "fieldId" }` | Renames/reassigns an owned device, only while the reported motor state is off. |
+| `POST /api/devices/delete` | Authenticated JSON `{ "deviceId" }` | Unpairs an owned device only while the reported motor state is off; saved device history remains. |
+| `POST /api/devices/telemetry` | ESP32 device ID/token headers and sensor JSON | Updates the live device document, stores a device-history average after five periodic reports, and sends moisture/timer push alerts. |
 
 Disease uploads accept JPG/JPEG/PNG/WEBP extensions, must be nonempty and no larger than 10 MB. The uploaded file is written to a generated temporary file for inference and removed in a `finally` block. The endpoint response does not include top-k predictions; the frontend's `top_predictions` UI field defaults to an empty list.
 
@@ -261,26 +275,25 @@ Saving calls `AuthContext.saveProfile`, which calls `saveFarmerProfile`. The pro
 | Farmer profile | `users/{uid}` |
 | Farms | `users/{uid}/farms/{farmId}` |
 | Fields | `users/{uid}/farms/{farmId}/fields/{fieldId}` |
-| Field sensor readings | `users/{uid}/farms/{farmId}/fields/{fieldId}/readings/{readingId}` |
+| Device and live reading | `users/{uid}/devices/{deviceId}` |
+| Device average history | `users/{uid}/devices/{deviceId}/readings/{readingId}` |
+| Legacy field sensor readings | `users/{uid}/farms/{farmId}/fields/{fieldId}/readings/{readingId}` |
 
 When Firebase is not configured, `farmerData.js` stores profiles, farms, fields, sensor readings, and active-field selection in browser localStorage under AgroSmart-prefixed keys. This data is browser-local and is not synchronized.
 
 ### Farm and field operations
 
-`FarmFields.jsx` loads the user's farms, then loads each farm's fields. It supports creating and editing a farm (name and size) and creating/editing fields (name, village, crop, area, and optional photo). These operations call `listFarms`, `saveFarm`, `listFields`, and `saveField`. Creation uses Firestore document creation; updates use document update operations. The page has no delete operation in the inspected UI or service.
+`FarmFields.jsx` loads the user's farms, then loads each farm's fields. It supports creating and editing a farm (name and size) and creating/editing fields (name, village, crop, and area). These operations call `listFarms`, `saveFarm`, `listFields`, and `saveField`. Creation uses Firestore document creation; updates use document update operations. The page has no delete operation in the inspected UI or service.
 
 Selecting a field saves its farm/field IDs as the user's active field in localStorage. Sensor-reading association uses that active-field selection.
 
 ### Photo uploads
 
-- Profile photo: `saveProfilePhoto` uploads to `users/{uid}/profile/{timestamped-filename}`.
-- Field photo: `saveFieldPhoto` uploads to `users/{uid}/farms/{farmId}/fields/{fieldId}/{timestamped-filename}`.
-- Both functions return the Firebase Storage object path. Profile setup stores that returned path as `photoURL`; the functions do not request a download URL.
-- Storage rules allow owner-only image uploads smaller than 5 MB, for JPEG, PNG, or WEBP content types.
+Profile and field photo uploads are not supported; the app does not use Firebase Storage.
 
 ### Sensor-reading persistence
 
-`recordSensorReading` writes readings beneath a field. In Firestore mode it verifies that the field exists and filters data to allowed string/finite-number keys (`temperature`, `humidity`, `soil`, `soil_moisture_percent`, `ldr`, `irrigation`, `pump_state`, `source`) before adding a server timestamp. Local mode appends readings to localStorage.
+The authenticated Flask backend writes ESP32 telemetry to the device document's latest-reading field and stores a five-sample average in that device's history. Farm/field assignment is optional metadata and does not control whether device readings are available. The client cannot write device state, commands, or device telemetry directly.
 
 `recordReadingForActiveField` requires an active farm and field. It throttles readings to at most one per minute per field in the current browser and updates the throttle timestamp only after a successful write. Firestore rules make readings owner-readable and create-only; updates/deletes are denied.
 
@@ -308,24 +321,26 @@ The disease prediction endpoint's actual response is authoritative; `backend/tes
 
 ## 7. Soil Monitoring Module
 
-- **Parameters shown/used:** The active monitoring page normalizes soil moisture from `soil_moisture_percent`, `soil_moisture`, or `soil`. When the raw value exceeds 100, it converts a 12-bit reading using assumed dry/wet calibration values and clamps the result to 0–100%. It also displays a light/day-night state from the ESP32 LDR field.
-- **Data source:** The browser polls the configured ESP32 at `/api/data` every five seconds. The browser must be able to reach the device and the device web server must allow cross-origin requests.
-- **Backend endpoints:** The active soil page does not call Flask `/sensor` or `/get_sensor`; those Flask routes are separate in-memory endpoints.
-- **Persistence:** Each successful poll attempts `recordReadingForActiveField` with moisture, soil/raw measurement, temperature, humidity, LDR and source metadata. Actual Firestore/localStorage persistence is subject to active-field selection and the one-minute throttle described above.
-- **Display limitations:** The active page displays moisture and light status, not a full nutrient/pH sensor dashboard. If the device is unavailable, it clears sensor data and displays a hardware-offline state rather than showing mock readings.
+- **Data source:** The page subscribes to the selected device document and displays its latest live moisture, temperature, humidity, N/P/K, and light values.
+- **Persistence:** The ESP32 reports periodic telemetry every minute. Flask updates the live device snapshot on every report and stores a five-sample numeric average in the device's history after five periodic reports. Event reports refresh live values but are excluded from averages.
+- **Device selection:** The Devices page selects a device independently of farm/field assignment. Its latest values are also used by Weather, Crop Recommendation, and Irrigation.
+- **Display:** Live values appear only when the latest ESP32 reading is less than 150 seconds old. When stale/offline, live sensor values are hidden while device history remains available.
 
 ## 8. Irrigation Module
 
-- **Readings:** `SmartIrrigation.jsx` polls the ESP32 `/api/data` endpoint every five seconds, normalizes moisture similarly to Soil Monitoring, and reads `pump_state` when present. Successful readings are also offered to the active-field sensor-reading persistence service.
-- **Manual control:** Pump start/stop sends a browser request to `/api/pump?state=1` or `/api/pump?state=0`. The UI updates from the device response when `pump_state` is present; if the request fails, it reports a hardware error rather than treating the command as successful.
-- **Automatic/manual mode:** Mode selection is frontend state. The UI text describes expected moisture thresholds, but the React component does not implement a local threshold-based automatic pump loop; it labels reported pump state as automatic when automatic mode is selected. Actual automatic control therefore depends on the ESP32/controller firmware, which is not present in this repository.
-- **Tank gauge and event history:** Tank level is currently a fixed 85% display, explicitly labelled as static/awaiting a tank sensor. The event-history panel is descriptive UI state; no irrigation-event history is queried or saved.
-- **Offline behavior:** The component clears moisture data and displays a hardware-offline warning when it cannot read the device.
+- **Pairing:** The signed-in farmer requests a ten-minute pairing code from the Devices page and may optionally assign a farm field. The ESP32 claims it with its eFuse-derived ID and random per-device credential; only the credential hash is stored.
+- **Device management:** The owner can add a device, edit its name/field assignment, select which device powers the monitoring pages, and remove it from the UI. The API blocks assignment changes and deletion while the latest reported motor state is on; removing a device retains its device history.
+- **Readings:** The page subscribes to owner-scoped Firestore device metadata and latest N/P/K, temperature, humidity, moisture, LDR, motor, and mode values.
+- **Manual control:** Runs default to one hour, are adjustable from 1 to 24 hours, and are bounded by backend validation. The ESP32 is responsible for turning the relay off at timer expiry before posting the timer-expired event.
+- **Automatic control:** The starter firmware runs the motor below 30% moisture and stops at/above 60%. Thresholds and hardware sensors must be calibrated and verified.
+- **Notifications:** Browser Firebase Messaging tokens are written under the user's notification-token subcollection. Push alerts are triggered by soil-moisture threshold changes, pump on/off transitions, and manual-timer expiry; only timer-expiry notifications offer Continue/Stop actions.
+- **History and graph:** Soil Monitoring and Irrigation graph selected fields from up to 100 device-history records, each representing five periodic samples. The record history is read-only.
+- **Limitations:** The firmware is a configurable starter, not a hardware-verified or safety-certified controller. The event-history area is currently descriptive; readings are available in Firestore but no event-history query is implemented.
 
 ## 9. Weather, Voice, and Other Implemented Integrations
 
-- **Weather:** `Weather.jsx` calls Open-Meteo for current conditions and a seven-day forecast (temperature, humidity, precipitation, wind, weather codes, daily high/low, precipitation probability, sunrise/sunset, and UV index). Coordinates are hard-coded for four location labels; an unmatched profile location falls back to the Karnataka coordinates. The page separately polls the ESP32 local station every five seconds.
-- **Voice assistant:** `VoiceAssistant.jsx` uses browser speech recognition/synthesis where available and supports voice navigation, crop recommendation inputs, weather reports, and pump tasks. It uses sessionStorage/window events for handoffs, the Flask TTS endpoint for Kannada audio, and direct ESP32 calls for live readings/control.
+- **Weather:** `Weather.jsx` calls Open-Meteo for current conditions and a seven-day forecast. It reads sensor values from the globally selected device's Firestore record.
+- **Voice assistant:** `VoiceAssistant.jsx` uses browser speech recognition/synthesis where available and supports voice navigation, crop recommendation inputs, weather reports, and pump tasks. Sensor reads use the selected device's latest document; pump controls use the authenticated Flask API and a one-hour manual default.
 - **TTS and chat:** The Flask Kannada TTS endpoint uses Google Cloud Text-to-Speech when configured. The backend chat endpoint uses Gemini when configured, but no active frontend caller for `/api/chat` was found in this source inspection.
 - **About and Contact:** About is informational. Contact form submission only sets a temporary success message; no email/contact API is present.
 

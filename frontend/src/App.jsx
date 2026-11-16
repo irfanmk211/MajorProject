@@ -14,10 +14,10 @@ import Weather from "./pages/Weather";
 import Profile from "./pages/Profile";
 import ProfileSetup from "./pages/ProfileSetup";
 import FarmFields from "./pages/FarmFields";
+import Devices from "./pages/Devices";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import VoiceAssistant from "./components/VoiceAssistant";
-import { useEffect } from "react";
 
 
 function AnimatedRoutes() {
@@ -31,6 +31,7 @@ function AnimatedRoutes() {
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/farms" element={<FarmFields />} />
+          <Route path="/devices" element={<Devices />} />
           <Route path="/crop" element={<Crop />} />
           <Route path="/disease" element={<Disease />} />
           <Route path="/soil" element={<SoilMonitoring />} />

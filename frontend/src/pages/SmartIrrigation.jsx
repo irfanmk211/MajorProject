@@ -1,298 +1,440 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { collection, onSnapshot } from "firebase/firestore";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
-  Droplets,
   Power,
   PowerOff,
   Waves,
   Gauge,
   History,
-  AlertCircle
+  AlertCircle,
+  Bell,
+  Wifi,
 } from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import GlassCard from "../components/ui/GlassCard";
 import RippleButton from "../components/ui/RippleButton";
 import PageTransition from "../components/ui/PageTransition";
 import CircularGauge from "../components/ui/CircularGauge";
-import { ESP32_IP } from "../config";
 import { useLanguage } from "../context/languageState";
 import { useAuth } from "../context/AuthContext";
-import { recordReadingForActiveField } from "../services/farmerData";
+import { db } from "../firebase";
+import {
+  getActiveDeviceId,
+  isDeviceReadingFresh,
+  sendDeviceCommand,
+  subscribeToActiveDeviceChanges,
+  subscribeToDeviceHistory,
+} from "../services/farmerData";
+import { registerPushNotifications } from "../services/pushNotifications";
+
+const getDeviceLabel = (item) => (
+  item.name && !item.name.startsWith("ESP32 ")
+    ? item.name
+    : `Irrigation unit ${item.id.slice(-4)}`
+);
 
 export default function SmartIrrigation() {
   const { t } = useLanguage();
-  const { user } = useAuth();
-  const [pumpOn, setPumpOn] = useState(false);
-  const [autoMode, setAutoMode] = useState(() => {
-    const manualRequested = sessionStorage.getItem("agrosmart_voice_manual_mode");
-    return !manualRequested;
-  });
-  const tankLevel = 85;
-  const [soilMoisture, setSoilMoisture] = useState(null);
-  const [error, setError] = useState(false);
+  const { user, authEnabled } = useAuth();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => getActiveDeviceId(user.uid));
+  const [readingHistory, setReadingHistory] = useState([]);
+  const [historyMetric, setHistoryMetric] = useState("moisture");
+  const [durationHours, setDurationHours] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [unsubscribePush, setUnsubscribePush] = useState(null);
+  const [now, setNow] = useState(0);
+  const [optimisticPumpState, setOptimisticPumpState] = useState(null);
 
   useEffect(() => {
-    sessionStorage.removeItem("agrosmart_voice_manual_mode");
-    const enableManualMode = () => setAutoMode(false);
-    window.addEventListener("agrosmart:voice-manual-mode", enableManualMode);
-    return () => window.removeEventListener("agrosmart:voice-manual-mode", enableManualMode);
+    const updateTime = () => setNow(Date.now());
+    const initialTimer = window.setTimeout(updateTime, 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, []);
 
-  // Helper to send pump toggle requests to ESP32
-  const controlPump = async (stateVal) => {
-    try {
-      const response = await fetch(`http://${ESP32_IP}/api/pump?state=${stateVal}`);
-      if (!response.ok) throw new Error("Offline");
-      const json = await response.json();
-      if (json.pump_state !== undefined) {
-        setPumpOn(json.pump_state === 1);
-      } else {
-        setPumpOn(stateVal === 1);
+  useEffect(() => {
+    if (!authEnabled || user?.isGuest) return undefined;
+    return onSnapshot(
+      collection(db, "users", user.uid, "devices"),
+      (snapshot) => {
+        setDevices(snapshot.docs.map((device) => ({ id: device.id, ...device.data() })));
+        setError("");
+        setLoading(false);
+      },
+      (snapshotError) => {
+        console.error("Could not load paired irrigation devices:", snapshotError);
+        setError("Paired devices could not be loaded. Check Firestore rules and try again.");
+        setLoading(false);
       }
-    } catch (err) {
-      console.error("Failed to toggle pump:", err);
-      // If hardware is offline, do NOT update local state to pretend it worked, just log it.
-      // But to let them test we can toggle it locally, though they said "dont make false", so we shouldn't pretend.
-      // Let's just alert the error.
-      alert(`${t("Hardware Offline:")} ${t("Unable to toggle pump at")} ${ESP32_IP}`);
+    );
+  }, [authEnabled, user.uid, user?.isGuest]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    return subscribeToActiveDeviceChanges(user.uid, () => {
+      setSelectedDeviceId(getActiveDeviceId(user.uid));
+    });
+  }, [user?.uid]);
+
+  const currentDeviceId = devices.some((item) => item.id === selectedDeviceId)
+    ? selectedDeviceId
+    : devices[0]?.id;
+  const device = devices.find((item) => item.id === currentDeviceId);
+  const reading = device?.latestReading;
+  const autoMode = device?.mode === "automatic";
+  const pumpOn = optimisticPumpState !== null
+    ? optimisticPumpState === "on"
+    : device?.motorState === "on";
+
+  useEffect(() => {
+    if (device?.motorState && optimisticPumpState && device.motorState === optimisticPumpState) {
+      setOptimisticPumpState(null);
+    }
+  }, [device?.motorState, optimisticPumpState]);
+  const lastSeen = device?.lastSeenAt?.toDate?.();
+  const readingAt = reading?.recordedAt?.toDate?.();
+  const isConnected = Boolean(now && lastSeen && now - lastSeen.getTime() < 150_000);
+  const hasData = Boolean(device && reading && isConnected && isDeviceReadingFresh(device, now));
+  const isLoading = loading && authEnabled && !user?.isGuest;
+  const displayReading = hasData ? reading : null;
+  const soilMoisture = displayReading?.moisture ?? null;
+  const chartData = [...readingHistory].reverse().flatMap((record) => {
+    const timestamp = record.recordedAt?.toDate?.();
+    const value = Number(record[historyMetric]);
+    return timestamp && Number.isFinite(value)
+      ? [{ time: timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), value }]
+      : [];
+  });
+
+  const runCommand = async (
+    action,
+    mode,
+    durationMinutes,
+    targetDeviceId = device?.id
+  ) => {
+    if (!targetDeviceId) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    if (action === "start" || action === "continue") {
+      setOptimisticPumpState("on");
+    } else if (action === "stop") {
+      setOptimisticPumpState("off");
+    }
+    try {
+      await sendDeviceCommand(
+        targetDeviceId,
+        action,
+        mode || (autoMode ? "automatic" : "manual"),
+        durationMinutes
+      );
+      setNotice(action === "start" || action === "continue"
+        ? "Motor started. Control command confirmed."
+        : "Motor stopped. Control command confirmed.");
+    } catch (commandError) {
+      setOptimisticPumpState(null);
+      console.error("Could not send motor command:", commandError);
+      setError(commandError.message || "Could not send the motor command.");
+    } finally {
+      setBusy(false);
     }
   };
 
-  // Poll ESP32 data every 5 seconds
+  // Auto-stop monitor: if in automatic mode and moisture reaches 60% or above, automatically stop motor
   useEffect(() => {
-    let active = true;
+    if (autoMode && hasData && soilMoisture !== null && soilMoisture >= 60 && pumpOn && !busy) {
+      console.log("Soil moisture reached safe limit (>= 60%). Stopping motor automatically.");
+      runCommand("stop", "automatic");
+    }
+  }, [autoMode, hasData, soilMoisture, pumpOn, busy]);
 
-    const fetchData = async () => {
-      try {
-        const response = await fetch(`http://${ESP32_IP}/api/data`);
-        if (!response.ok) throw new Error("Offline");
-        const json = await response.json();
-        
-        if (active) {
-          // Parse moisture robustly (percentage, raw, or alternate key)
-          let moisture = null;
-          if (json.soil_moisture_percent !== undefined) {
-            moisture = json.soil_moisture_percent;
-          } else if (json.soil_moisture !== undefined) {
-            if (json.soil_moisture <= 100) {
-              moisture = json.soil_moisture;
-            } else {
-              // Convert 12-bit ADC raw soil moisture value to percentage
-              // Assumes 3500 as dry (0%) and 1500 as wet (100%)
-              moisture = Math.round(((3500 - json.soil_moisture) / (3500 - 1500)) * 100);
-            }
-          } else if (json.soil !== undefined) {
-            moisture = json.soil;
-          }
+  const enablePush = async () => {
+    setError("");
+    try {
+      const unsubscribe = await registerPushNotifications();
+      setUnsubscribePush(() => unsubscribe);
+      setPushEnabled(true);
+      setNotice("Push notifications enabled on this browser.");
+    } catch (pushError) {
+      console.error("Could not enable push notifications:", pushError);
+      setError(pushError.message || "Could not enable push notifications.");
+    }
+  };
 
-          const finalMoisture = moisture !== null ? Math.max(0, Math.min(100, moisture)) : null;
-          setSoilMoisture(finalMoisture);
-          recordReadingForActiveField(user.uid, {
-            soil_moisture_percent: finalMoisture,
-            soil: json.soil ?? json.soil_moisture ?? finalMoisture,
-            temperature: json.temperature,
-            humidity: json.humidity,
-            ldr: json.ldr_state ?? json.ldr,
-            irrigation: json.irrigation,
-            pump_state: json.pump_state,
-            source: "ESP32",
-          }).catch((storageError) => console.error("Could not save ESP32 sensor reading:", storageError));
-          
-          // Parse ESP32 pump state if present: 1 is ON, 0 is OFF
-          if (json.pump_state !== undefined) {
-            setPumpOn(json.pump_state === 1);
-          }
-          
-          setError(false);
-        }
-      } catch {
-        if (active) {
-          setError(true);
-          setSoilMoisture(null); // Clear sensor data when offline
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+  useEffect(() => {
+    const handlePushMessage = (event) => {
+      const notification = event.detail?.notification;
+      if (notification?.body) setNotice(`${notification.title || "AgroSmart alert"}: ${notification.body}`);
     };
-
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-
+    window.addEventListener("agrosmart:push-message", handlePushMessage);
     return () => {
-      active = false;
-      clearInterval(interval);
+      window.removeEventListener("agrosmart:push-message", handlePushMessage);
+      unsubscribePush?.();
     };
-  }, [autoMode, user.uid]);
+  }, [unsubscribePush]);
 
-  const hasData = !loading && !error && soilMoisture !== null;
+  useEffect(() => {
+    const action = searchParams.get("notificationAction");
+    const targetDeviceId = searchParams.get("deviceId");
+    if (!action || !["continue", "stop"].includes(action) || !devices.some((item) => item.id === targetDeviceId)) return;
+    setSearchParams({}, { replace: true });
+    sendDeviceCommand(targetDeviceId, action, "manual").then(
+      () => setNotice(action === "continue"
+        ? "Continue command sent. The device will confirm its state."
+        : "Stop command sent to the device."),
+      (commandError) => {
+        console.error("Could not apply the notification action:", commandError);
+        setError(commandError.message || "Could not apply the notification action.");
+      }
+    );
+  }, [devices, searchParams, setSearchParams]);
+
+  const startManualMotor = () => {
+    runCommand("start", "manual", durationHours * 60);
+  };
+
+  const formatSensor = (value, suffix = "") => (
+    Number.isFinite(value) ? `${Number(value).toFixed(1)}${suffix}` : "—"
+  );
+
+  useEffect(() => {
+    if (!authEnabled || user?.isGuest || !device?.id) return undefined;
+    return subscribeToDeviceHistory(
+      user.uid, device.id, device.farmId, device.fieldId,
+      setReadingHistory,
+      (historyError) => {
+        console.error("Could not load sensor history:", historyError);
+        setError("Sensor history could not be loaded. Check Firestore rules and try again.");
+      }
+    );
+  }, [authEnabled, device?.fieldId, device?.farmId, device?.id, user.uid, user?.isGuest]);
+
+  useEffect(() => {
+    if (location.hash !== "#notification-settings") return;
+    const frame = window.requestAnimationFrame(() => {
+      const settings = document.getElementById("notification-settings");
+      settings?.scrollIntoView({ behavior: "smooth", block: "center" });
+      settings?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash]);
 
   return (
     <PageTransition className="mx-auto max-w-7xl space-y-8">
-      {/* Alert Banner for offline ESP32 */}
       {error && (
         <div className="flex items-center gap-3 rounded-2xl bg-red-500/10 border border-red-500/20 p-4 text-red-600 dark:text-red-400">
           <AlertCircle size={20} className="shrink-0" />
-          <div className="text-sm">
-            <span className="font-bold">{t("Hardware Offline:")}</span> {t("Unable to reach ESP32 at")} <code className="bg-red-500/10 px-1 py-0.5 rounded">{ESP32_IP}</code>. {t("Auto-irrigation is suspended until connection is restored.")}
-          </div>
+          <div className="text-sm">{error}</div>
+        </div>
+      )}
+      {notice && (
+        <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4 text-sm text-sky-700 dark:text-sky-300">
+          {notice}
         </div>
       )}
 
+      <GlassCard hover={false}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800 dark:text-white">
+              <Wifi size={20} className={isConnected ? "text-emerald-500" : "text-slate-400"} />
+              Selected irrigation device
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {isLoading ? "Loading paired devices…" : device
+                ? `${getDeviceLabel(device)} · ${device.id} · ${isConnected ? "Connected" : "Offline"}`
+                : "No device is selected. Pair or select one on the Devices page."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/devices" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30">
+              <Wifi size={16} /> {device ? "Manage devices" : "Open Devices"}
+            </Link>
+            <div id="notification-settings" tabIndex={-1} className="rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <RippleButton onClick={enablePush} disabled={pushEnabled || busy || user?.isGuest} className="flex min-h-11 items-center gap-2">
+                <Bell size={16} /> {pushEnabled ? "Notifications enabled" : "Enable notifications"}
+              </RippleButton>
+            </div>
+          </div>
+        </div>
+      </GlassCard>
+
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Tank Level Gauge */}
         <GlassCard>
-          <CircularGauge
-            value={tankLevel ?? 0}
-            label={t("Water Tank Level")}
-          />
-          <p className="mt-2 text-center text-xs text-slate-500">
-            {t("Awaiting tank sensor (Static 85%)")}
-          </p>
+          <CircularGauge value={soilMoisture ?? "—"} unit={soilMoisture !== null ? "%" : ""} label={t("Soil Moisture")} />
+          {!hasData && <p className="mt-2 text-center text-xs text-slate-500">Waiting for device telemetry.</p>}
         </GlassCard>
-
-        {/* Soil Moisture Gauge */}
-        <GlassCard>
-          <CircularGauge
-            value={soilMoisture !== null ? soilMoisture : "—"}
-            unit={soilMoisture !== null ? "%" : ""}
-            label={t("Soil Moisture")}
-          />
-          {soilMoisture === null && (
-            <p className="mt-2 text-center text-xs text-red-500 font-semibold">{t("Sensor Offline / Not Found")}</p>
-          )}
-        </GlassCard>
-
-        {/* Pump Status Card */}
-        <GlassCard>
-          <div className="flex flex-col items-center gap-3 py-4">
-            <div className={`flex h-16 w-16 items-center justify-center rounded-full transition-all duration-500 ${pumpOn && hasData ? "bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/40 text-white" : "bg-slate-300 dark:bg-slate-600 text-slate-500"}`}>
-              {pumpOn && hasData ? <Power size={28} /> : <PowerOff size={28} />}
+        {[
+          ["Temperature", formatSensor(displayReading?.temperature, " °C")],
+          ["Humidity", formatSensor(displayReading?.humidity, " %")],
+          ["N / P / K", `${formatSensor(displayReading?.n)} / ${formatSensor(displayReading?.p)} / ${formatSensor(displayReading?.k)}`],
+        ].map(([label, value]) => (
+          <GlassCard key={label}>
+            <div className="flex h-full flex-col items-center justify-center gap-3 py-4">
+              <Gauge size={28} className="text-sky-500" />
+              <span className="font-bold text-slate-800 dark:text-white">{value}</span>
+              <span className="text-center text-xs text-slate-500">{t(label)}</span>
             </div>
-            <span className="font-bold text-slate-800 dark:text-white">
-              {t("Pump")} {!hasData ? t("UNKNOWN") : (pumpOn ? t("RUNNING") : t("OFF"))}
-            </span>
-            <span className="text-xs text-slate-500">
-              {!hasData ? t("Check hardware connection") : (autoMode ? (pumpOn ? t("Triggered by Auto-logic") : t("Idle (Optimal Moisture)")) : t("Manual control enabled"))}
-            </span>
-          </div>
-        </GlassCard>
-
-        {/* Auto/Manual Mode Card */}
-        <GlassCard>
-          <div className="flex flex-col items-center gap-3 py-4">
-            <div className={`flex h-16 w-16 items-center justify-center rounded-full bg-sky-100 dark:bg-sky-950/40 text-sky-600`}>
-              <Gauge size={28} />
-            </div>
-            <span className="font-bold text-slate-800 dark:text-white">
-              {autoMode ? t("Automatic Mode") : t("Manual Mode")}
-            </span>
-            <span className="text-xs text-slate-500 text-center px-2">
-              {autoMode ? t("Pump state updates based on soil moisture (<35% On, >=60% Off)") : t("Control pump manually below")}
-            </span>
-          </div>
-        </GlassCard>
+          </GlassCard>
+        ))}
       </div>
 
-      {/* Pipeline Status Banner */}
       <GlassCard hover={false} className="relative overflow-hidden">
-        <div className="flex items-center justify-between mb-6">
-          <h4 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+        <div className="mb-5 flex items-center justify-between">
+          <h4 className="flex items-center gap-2 font-bold text-slate-800 dark:text-white">
             <Waves className="text-sky-500" /> {t("Irrigation Pipeline Status")}
           </h4>
-          {pumpOn && hasData && (
-            <motion.span
-              animate={{ opacity: [1, 0.5, 1] }}
-              transition={{ repeat: Infinity, duration: 1 }}
-              className="text-sm font-semibold text-emerald-500"
-            >
-              {t("Water Flowing...")}
-            </motion.span>
-          )}
+          <span className={`text-sm font-semibold ${pumpOn ? "text-emerald-500 font-bold" : (hasData ? "text-slate-500" : "text-amber-500")}`}>
+            {pumpOn
+              ? (optimisticPumpState === "on" && device?.motorState !== "on" ? "Relay command: ON (Starting...)" : "Relay command: ON")
+              : (optimisticPumpState === "off" && device?.motorState === "on" ? "Relay command: OFF (Stopping...)" : (hasData ? "Relay command: OFF" : "No recent telemetry"))}
+          </span>
         </div>
-
-        <div className="relative h-16 rounded-xl bg-slate-200 dark:bg-slate-700 overflow-hidden">
-          <div className="absolute inset-y-0 left-0 w-full flex items-center px-4">
-            <div className="h-3 flex-1 rounded-full bg-slate-300 dark:bg-slate-600 relative overflow-hidden">
-              {pumpOn && hasData && (
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-sky-400 via-sky-300 to-sky-400"
-                  style={{ backgroundSize: "40px 100%" }}
-                  animate={{ backgroundPosition: ["0 0", "40px 0"] }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-              )}
-            </div>
-          </div>
-          {[...Array(5)].map((_, i) => (
-            pumpOn && hasData && (
-              <motion.div
-                key={i}
-                className="absolute bottom-0 text-sky-400"
-                style={{ left: `${15 + i * 18}%` }}
-                animate={{ y: [0, -20, 0], opacity: [0, 1, 0] }}
-                transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.3 }}
-              >
-                <Droplets size={16} />
-              </motion.div>
-            )
-          ))}
+        <div className="grid gap-3 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-3">
+          <p>Mode: <strong>{hasData ? (autoMode ? "Automatic" : "Manual") : "—"}</strong></p>
+          <p>Light: <strong>{displayReading?.ldr === "day" ? "Day" : displayReading?.ldr === "night" ? "Night" : formatSensor(displayReading?.ldr)}</strong></p>
+          <p>Last telemetry: <strong>{readingAt ? readingAt.toLocaleString() : "—"}</strong></p>
         </div>
+        <p className="mt-3 text-xs text-slate-500">
+          This is the ESP32 relay command, not verified pump feedback; no motor/flow sensor is connected.
+        </p>
       </GlassCard>
 
-      {/* Control Buttons */}
-      <div className="flex flex-wrap gap-3">
-        <RippleButton
-          onClick={() => {
-            setAutoMode(false);
-            controlPump(1);
-          }}
-          disabled={!hasData || (pumpOn && !autoMode)}
-          className="flex items-center gap-2"
-        >
-          <Power size={18} /> {t("Start Pump Manually")}
-        </RippleButton>
-        
-        <RippleButton
-          variant="danger"
-          onClick={() => {
-            setAutoMode(false);
-            controlPump(0);
-          }}
-          disabled={!hasData || (!pumpOn && !autoMode)}
-          className="flex items-center gap-2"
-        >
-          <PowerOff size={18} /> {t("Stop Pump Manually")}
-        </RippleButton>
-
-        <RippleButton
-          variant={autoMode ? "secondary" : "outline"}
-          onClick={() => setAutoMode(true)}
-        >
-          {t("Enable Auto Mode")}
-        </RippleButton>
-
-        <RippleButton
-          variant={!autoMode ? "secondary" : "outline"}
-          onClick={() => setAutoMode(false)}
-        >
-          {t("Enable Manual Mode")}
-        </RippleButton>
-      </div>
-
-      {/* Irrigation History Card */}
       <GlassCard hover={false}>
-        <h4 className="mb-4 flex items-center gap-2 font-bold text-slate-800 dark:text-white">
-          <History size={20} /> {t("Irrigation Events History")}
-        </h4>
-        <div className="py-8 text-center text-slate-500">
-          <p>{t("Irrigation Controller is linked.")}</p>
-          {pumpOn && hasData ? (
-            <p className="mt-2 text-sm text-emerald-500 font-semibold">{t("Active watering event is currently in progress.")}</p>
-          ) : (
-            <p className="mt-2 text-sm">{t("System is idle. No recent irrigation events detected.")}</p>
-          )}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="flex items-center gap-2 font-bold text-slate-800 dark:text-white">
+              <History size={20} className="text-sky-500" /> Sensor history
+            </h4>
+            <p className="mt-1 text-xs text-slate-500">Five-sample averages from the selected device; live values come from its latest report.</p>
+          </div>
+          <select
+            value={historyMetric}
+            onChange={(event) => setHistoryMetric(event.target.value)}
+            className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
+            aria-label="Select graph measurement"
+          >
+            <option value="moisture">Soil moisture (%)</option>
+            <option value="temperature">Temperature (°C)</option>
+            <option value="humidity">Humidity (%)</option>
+            <option value="n">Nitrogen (N)</option>
+            <option value="p">Phosphorus (P)</option>
+            <option value="k">Potassium (K)</option>
+          </select>
+        </div>
+        {chartData.length ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" opacity={0.3} />
+              <XAxis dataKey="time" stroke="#94a3b8" minTickGap={30} />
+              <YAxis stroke="#94a3b8" />
+              <Tooltip />
+              <Line type="monotone" dataKey="value" name={historyMetric} stroke="#10b981" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="py-12 text-center text-sm text-slate-500">
+            {device ? "No stored history is available for this device yet." : "Pair a device to see its sensor graph."}
+          </p>
+        )}
+        {readingHistory.length > 0 && (
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Recorded</th>
+                  <th className="px-3 py-2">Moisture</th>
+                  <th className="px-3 py-2">Temp</th>
+                  <th className="px-3 py-2">Humidity</th>
+                  <th className="px-3 py-2">N / P / K</th>
+                </tr>
+              </thead>
+              <tbody>
+                {readingHistory.slice(0, 20).map((record) => (
+                  <tr key={record.id} className="border-t border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                    <td className="px-3 py-2">{record.recordedAt?.toDate?.().toLocaleString() || "—"}</td>
+                    <td className="px-3 py-2">{formatSensor(record.moisture, "%")}</td>
+                    <td className="px-3 py-2">{formatSensor(record.temperature, "°C")}</td>
+                    <td className="px-3 py-2">{formatSensor(record.humidity, "%")}</td>
+                    <td className="px-3 py-2">{formatSensor(record.n)} / {formatSensor(record.p)} / {formatSensor(record.k)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </GlassCard>
+
+      <GlassCard hover={false}>
+        <h4 className="mb-4 font-bold text-slate-800 dark:text-white">Motor control</h4>
+        <div className="mb-4 flex flex-wrap gap-3">
+          <RippleButton
+            variant={autoMode ? "secondary" : "outline"}
+            disabled={!device || !isConnected || busy || autoMode}
+            onClick={() => runCommand("mode", "automatic")}
+          >
+            Enable automatic (30% on / 60% off)
+          </RippleButton>
+          <RippleButton
+            variant={!autoMode ? "secondary" : "outline"}
+            disabled={!device || !isConnected || busy || !autoMode}
+            onClick={() => runCommand("mode", "manual")}
+          >
+            Enable manual
+          </RippleButton>
+        </div>
+        {!autoMode && (
+          <label className="mb-4 flex max-w-xs flex-col gap-1 text-sm text-slate-600 dark:text-slate-300">
+            Manual run duration (hours)
+            <input
+              type="number"
+              min="1"
+              max="24"
+              step="1"
+              value={durationHours}
+              onChange={(event) => setDurationHours(Math.max(1, Math.min(24, Number(event.target.value) || 1)))}
+              className="rounded-xl border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"
+            />
+          </label>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <RippleButton
+            onClick={startManualMotor}
+            disabled={!hasData || busy || autoMode || pumpOn}
+            className="flex items-center gap-2"
+          >
+            <Power size={18} /> Start motor for {durationHours} hour(s)
+          </RippleButton>
+          <RippleButton
+            variant="danger"
+            onClick={() => runCommand("stop", "manual")}
+            disabled={!device || busy}
+            className="flex items-center gap-2"
+          >
+            <PowerOff size={18} /> Stop motor
+          </RippleButton>
         </div>
       </GlassCard>
+
     </PageTransition>
   );
 }

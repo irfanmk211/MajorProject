@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 export default function AppLayout() {
   const { user, loading, profileComplete } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const sidebarWidth = collapsed ? 72 : 260;
 
   if (loading) {
@@ -22,16 +23,24 @@ export default function AppLayout() {
   if (!profileComplete && !user.isGuest) return <Navigate to="/profile-setup" replace />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
-      <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
-      <TopNav sidebarWidth={sidebarWidth} />
+    <div className="min-h-screen overflow-x-clip bg-gradient-to-br from-slate-50 via-emerald-50/30 to-sky-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      <Sidebar
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        mobileMenuOpen={mobileMenuOpen}
+        setMobileMenuOpen={setMobileMenuOpen}
+      />
+      <TopNav
+        sidebarWidth={sidebarWidth}
+        collapsed={collapsed}
+        onMenuClick={() => setMobileMenuOpen(true)}
+      />
       <main
-        style={{ marginLeft: sidebarWidth }}
-        className="min-h-[calc(100vh-140px)] px-4 py-6 md:px-8"
+        className={`min-h-[calc(100vh-140px)] min-w-0 px-4 py-5 sm:px-6 md:px-8 md:py-6 ${collapsed ? "md:ml-[72px]" : "md:ml-[260px]"}`}
       >
         <Outlet />
       </main>
-      <Footer sidebarWidth={sidebarWidth} />
+      <Footer collapsed={collapsed} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import {
   Sun,
   CloudRain,
@@ -13,13 +14,17 @@ import {
   AlertTriangle,
   Wifi,
   Moon,
-  AlertCircle
 } from "lucide-react";
 import GlassCard from "../components/ui/GlassCard";
 import PageTransition from "../components/ui/PageTransition";
 import { useAuth } from "../context/AuthContext";
-import { ESP32_IP } from "../config";
 import { useLanguage } from "../context/languageState";
+import {
+  isDeviceReadingFresh,
+  selectUserDevice,
+  subscribeToActiveDeviceChanges,
+  subscribeToUserDevices,
+} from "../services/farmerData";
 
 const LOCATIONS = {
   "Karnataka, India": { latitude: 12.9716, longitude: 77.5946 },
@@ -48,7 +53,7 @@ function pickIcon(code) {
 }
 
 export default function Weather() {
-  const { user } = useAuth();
+  const { user, authEnabled } = useAuth();
   const { t } = useLanguage();
   const locationLabel = user?.location || "Karnataka, India";
   const coords = LOCATIONS[locationLabel] || LOCATIONS["Karnataka, India"];
@@ -56,40 +61,54 @@ export default function Weather() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [weather, setWeather] = useState(null);
+  const [now, setNow] = useState(0);
 
-  // ESP32 Local Station Readings State
-  const [localReadings, setLocalReadings] = useState(null);
-  const [localError, setLocalError] = useState(false);
+  const [stationData, setStationData] = useState({ uid: "", device: null, status: "loading" });
 
-  // Poll ESP32 local sensor data
   useEffect(() => {
-    let active = true;
-
-    const fetchLocalData = async () => {
-      try {
-        const response = await fetch(`http://${ESP32_IP}/api/data`);
-        if (!response.ok) throw new Error("Offline");
-        const json = await response.json();
-        if (active) {
-          setLocalReadings(json);
-          setLocalError(false);
-        }
-      } catch (err) {
-        if (active) {
-          setLocalError(true);
-          setLocalReadings(null); // Clear local readings when offline
-        }
-      }
-    };
-
-    fetchLocalData();
-    const interval = setInterval(fetchLocalData, 5000);
-
+    const updateTime = () => setNow(Date.now());
+    const initialTimer = window.setTimeout(updateTime, 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
     return () => {
-      active = false;
-      clearInterval(interval);
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (!authEnabled || user?.isGuest || !user?.uid) {
+      return undefined;
+    }
+    let devices = [];
+    const updateSelectedDevice = () => {
+      const device = selectUserDevice(user.uid, devices);
+      if (!device) {
+        setStationData({ uid: user.uid, device: null, status: "unpaired" });
+        return;
+      }
+      if (!device.latestReading) {
+        setStationData({ uid: user.uid, device, status: "no-reading" });
+        return;
+      }
+      setStationData({
+        uid: user.uid,
+        device,
+        status: "ready",
+      });
+    };
+    const unsubscribeDevices = subscribeToUserDevices(user.uid, (nextDevices) => {
+      devices = nextDevices;
+      updateSelectedDevice();
+    }, (snapshotError) => {
+      console.error("Could not load connected station data:", snapshotError);
+      setStationData({ uid: user.uid, device: null, status: "error" });
+    });
+    const unsubscribeSelection = subscribeToActiveDeviceChanges(user.uid, updateSelectedDevice);
+    return () => {
+      unsubscribeDevices();
+      unsubscribeSelection();
+    };
+  }, [authEnabled, user?.isGuest, user?.uid]);
 
   // Fetch Open-Meteo Weather Forecast
   useEffect(() => {
@@ -164,7 +183,10 @@ export default function Weather() {
   }
 
   const { current, daily } = weather;
-  const CurrentIcon = pickIcon(current.weather_code);
+  const currentIcon = createElement(pickIcon(current.weather_code), {
+    size: 80,
+    className: "text-yellow-400 opacity-80",
+  });
 
   const metrics = [
     { label: "Temperature", value: `${Math.round(current.temperature_2m)}°C`, icon: Thermometer, color: "text-orange-500" },
@@ -184,7 +206,31 @@ export default function Weather() {
     icon: pickIcon(daily.weather_code[i]),
   }));
 
-  const localHasData = !localError && localReadings !== null;
+  const stationIsCurrent = stationData.uid === user?.uid;
+  const localReadings = stationIsCurrent ? stationData.device?.latestReading : null;
+  const lastReportedDate = localReadings?.recordedAt?.toDate?.();
+  const localStatus = !authEnabled || user?.isGuest || !user?.uid
+    ? "unavailable"
+    : !stationIsCurrent
+      ? "loading"
+      : stationData.status === "ready"
+        ? !now ? "loading" : isDeviceReadingFresh(stationData.device, now) ? "online" : "stale"
+        : stationData.status;
+  const localHasData = localStatus === "online" && localReadings !== null && localReadings !== undefined;
+  const lightIsDay = localReadings?.ldr === "day" || localReadings?.ldr === 0;
+  const localStatusMessage = {
+    loading: t("Connecting to station..."),
+    unpaired: t("Add or pair a device on the Devices page."),
+    "no-reading": t("The selected device has not sent sensor readings yet."),
+    unavailable: t("Sign in to view connected sensor readings."),
+    stale: t("Device is offline. Live readings are hidden; stored history remains available."),
+    error: t("Could not load station data. Check your connection and Firestore access."),
+  }[localStatus];
+  const localDotColor = localStatus === "online"
+    ? "bg-emerald-400"
+    : localStatus === "loading"
+      ? "bg-amber-400"
+      : "bg-red-400";
 
   return (
     <PageTransition className="mx-auto max-w-7xl space-y-8">
@@ -197,7 +243,7 @@ export default function Weather() {
               animate={{ rotate: 360 }}
               transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
             >
-              <CurrentIcon size={80} className="text-yellow-400 opacity-80" />
+              {currentIcon}
             </motion.div>
           </div>
           <div className="relative z-10 flex flex-col justify-between h-full min-h-[160px]">
@@ -216,14 +262,14 @@ export default function Weather() {
           </div>
         </GlassCard>
 
-        {/* Right Column: Live IoT Weather Station Card (ESP32) */}
+        {/* Right Column: Live IoT Weather Station Card */}
         <GlassCard hover={false} className="relative overflow-hidden h-full border border-emerald-500/20">
           <div className="absolute top-0 right-0 p-8">
             <motion.div
               animate={!localHasData ? {} : { y: [0, -6, 0] }}
               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
             >
-              {localHasData && localReadings?.ldr_state === 0 ? (
+              {localHasData && lightIsDay ? (
                 <Sun size={80} className="text-amber-500 opacity-80 animate-pulse-glow" />
               ) : (
                 <Moon size={80} className="text-indigo-400 opacity-80" />
@@ -235,13 +281,16 @@ export default function Weather() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${localError ? "bg-red-400" : "bg-emerald-400"}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${localError ? "bg-red-500" : "bg-emerald-500"}`}></span>
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${localDotColor}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${localStatus === "online" ? "bg-emerald-500" : localStatus === "loading" ? "bg-amber-500" : "bg-red-500"}`}></span>
                 </span>
                 <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <Wifi size={14} /> {t("Live Local IoT Station")}
+                  <Wifi size={14} /> {t("Selected device")}
                 </p>
               </div>
+              {stationIsCurrent && stationData.device?.name && (
+                <p className="mt-1 text-xs text-slate-400">{stationData.device.name}</p>
+              )}
 
               <h2 className="mt-2 text-5xl font-extrabold text-slate-800 dark:text-white flex items-baseline">
                 {localHasData ? `${localReadings.temperature}°C` : "—"}
@@ -258,18 +307,38 @@ export default function Weather() {
                   </span>
                 </div>
                 <div>
+                  <span className="text-slate-400 block text-xs">{t("Soil Moisture")}</span>
+                  <span className="font-bold text-slate-800 dark:text-white">
+                    {localHasData ? `${localReadings.moisture}%` : "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-xs">{t("N / P / K")}</span>
+                  <span className="font-bold text-slate-800 dark:text-white">
+                    {localHasData
+                      ? [localReadings.n, localReadings.p, localReadings.k].every(Number.isFinite)
+                        ? `${localReadings.n} / ${localReadings.p} / ${localReadings.k} mg/kg`
+                        : "—"
+                      : "—"}
+                  </span>
+                </div>
+                <div>
                   <span className="text-slate-400 block text-xs">{t("Light level")}</span>
                   <span className="font-bold text-slate-800 dark:text-white">
-                    {localHasData ? (localReadings.ldr_state === 0 ? `☀️ ${t("Daylight")}` : `🌙 ${t("Night")}`) : "—"}
+                    {localHasData ? (lightIsDay ? `☀️ ${t("Daylight")}` : `🌙 ${t("Night")}`) : "—"}
                   </span>
                 </div>
               </div>
-              {localError && (
-                <p className="text-red-500 text-xs mt-2 font-semibold">
-                  {t("ESP32 Station Offline")}
-                </p>
+              <p className={`text-xs mt-2 ${localHasData ? "text-slate-400" : "font-semibold text-amber-600 dark:text-amber-400"}`}>
+                {localHasData && lastReportedDate
+                  ? `${t("Last report:")} ${lastReportedDate.toLocaleString()}`
+                  : localStatusMessage}
+              </p>
+              {!localHasData && stationData.device && (
+                <Link to="/soil" className="mt-2 inline-block text-xs font-semibold text-emerald-700 underline dark:text-emerald-300">
+                  {t("View stored sensor history")}
+                </Link>
               )}
-              <p className="text-xs text-slate-400 mt-1">{t("Station IP:")} {ESP32_IP}</p>
             </div>
           </div>
         </GlassCard>

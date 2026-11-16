@@ -9,7 +9,7 @@ import {
   listFields,
   saveFarm,
   saveField,
-  saveFieldPhoto,
+  uploadImage,
   setActiveField as persistActiveField,
 } from "../services/farmerData";
 
@@ -99,8 +99,12 @@ export default function FarmFields() {
         sizeInAcres: Number(fieldForm.sizeInAcres),
       }, editingField || undefined);
       if (fieldPhoto) {
-        const photoURL = await saveFieldPhoto(user.uid, targetFarm, fieldId, fieldPhoto);
-        await saveField(user.uid, targetFarm, { ...fieldForm, sizeInAcres: Number(fieldForm.sizeInAcres), photoURL }, fieldId);
+        const photoURL = await uploadImage(fieldPhoto, "field", { farmId: targetFarm, fieldId });
+        await saveField(user.uid, targetFarm, {
+          ...fieldForm,
+          sizeInAcres: Number(fieldForm.sizeInAcres),
+          photoURL,
+        }, fieldId);
       }
       setFieldForm({ name: "", village: "", crop: "", sizeInAcres: "" });
       setEditingField("");
@@ -238,7 +242,7 @@ export default function FarmFields() {
               <input className={inputClass} maxLength={100} value={fieldForm.crop} onChange={(event) => setFieldForm({ ...fieldForm, crop: event.target.value })} />
             </label>
             <label className="text-sm font-semibold text-slate-700">{t("Field image (optional)")}
-              <input className={inputClass} type="file" accept="image/jpeg,image/png,image/webp" disabled={!authEnabled} onChange={(event) => {
+              <input className={inputClass} type="file" accept="image/jpeg,image/png,image/webp" disabled={!authEnabled || saving} onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file && file.size > 5 * 1024 * 1024) {
                   setError(t("Choose a field image smaller than 5 MB."));

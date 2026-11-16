@@ -11,6 +11,8 @@ import {
   Mail,
   Pencil,
   Tractor,
+  Phone,
+  UserRound,
 } from "lucide-react";
 import GlassCard from "../components/ui/GlassCard";
 import RippleButton from "../components/ui/RippleButton";
@@ -24,6 +26,38 @@ export default function Profile() {
   const { dark, toggle } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const [crops, setCrops] = useState(user?.crops?.join(", ") || "Rice, Wheat");
+  const details = [
+    { icon: Mail, label: "Email address", value: user?.email },
+    { icon: Phone, label: "Mobile number", value: user?.mobileNumber },
+    { icon: UserRound, label: "Gender", value: user?.gender },
+    { icon: UserRound, label: "Age", value: user?.age },
+    {
+      icon: UserRound,
+      label: "Preferred language",
+      value: user?.preferredLanguage === "kn" ? "Kannada" : "English",
+    },
+    { icon: MapPin, label: "State", value: user?.state },
+    { icon: MapPin, label: "District", value: user?.district },
+    { icon: MapPin, label: "Taluk / Mandal", value: user?.taluk },
+    { icon: MapPin, label: "Village", value: user?.village },
+    { icon: MapPin, label: "Complete address", value: user?.completeAddress },
+    { icon: UserRound, label: "Farmer category", value: user?.farmerCategory },
+    {
+      icon: Ruler,
+      label: "Farm Size",
+      value: user?.farmSize ? `${user.farmSize} acres` : "",
+    },
+    { icon: Tractor, label: "Farming type", value: user?.farmingType },
+    { icon: Tractor, label: "Main occupation", value: user?.mainOccupation },
+    { icon: MapPin, label: "Land ownership", value: user?.landOwnership },
+    { icon: Sprout, label: "Preferred Crops", value: crops },
+    { icon: MapPin, label: "Farm Location", value: user?.location },
+    {
+      icon: UserRound,
+      label: "Profile photo",
+      value: user?.photoURL ? "Uploaded" : "Not set",
+    },
+  ].filter((item) => item.value !== undefined && item.value !== null && item.value !== "");
 
   return (
     <PageTransition className="mx-auto max-w-4xl space-y-8">
@@ -51,20 +85,13 @@ export default function Profile() {
       </GlassCard>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {[
-          { icon: MapPin, label: "Farm Location", value: user?.location || t("Not set") },
-          { icon: Ruler, label: "Farm Size", value: user?.farmSize || t("Not set") },
-          { icon: Sprout, label: "Preferred Crops", value: crops || t("Not set") },
-          { icon: Mail, label: "Email", value: user?.email || t("Not set") },
-          { icon: Tractor, label: "Farming type", value: user?.farmingType || t("Not set") },
-          { icon: MapPin, label: "Village", value: user?.village || t("Not set") },
-        ].map((item, i) => (
+        {details.map((item, i) => (
           <GlassCard key={item.label} delay={i * 0.08}>
             <div className="flex items-start gap-3">
               <item.icon className="text-agri-500 mt-0.5" size={20} />
-              <div>
+              <div className={item.label === "Complete address" ? "min-w-0" : ""}>
                 <p className="text-sm text-slate-500">{t(item.label)}</p>
-                <p className="font-semibold text-slate-800 dark:text-white">{t(item.value)}</p>
+                <p className="break-words font-semibold text-slate-800 dark:text-white">{t(String(item.value))}</p>
               </div>
             </div>
           </GlassCard>

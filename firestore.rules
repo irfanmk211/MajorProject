@@ -9,6 +9,42 @@ service cloud.firestore {
       allow read, create, update: if isOwner(userId);
       allow delete: if false;
 
+      match /crop_predictions/{predictionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'userId', 'input', 'predictions', 'createdAt'
+          ])
+          && request.resource.data.userId == userId
+          && request.resource.data.createdAt == request.time;
+        allow update: if isOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes'])
+          && request.resource.data.notes is string
+          && request.resource.data.notes.size() <= 500;
+        allow delete: if isOwner(userId);
+      }
+
+      match /devices/{deviceId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+
+        match /readings/{readingId} {
+          allow read: if isOwner(userId);
+          allow write: if false;
+        }
+      }
+
+      match /notification_tokens/{tokenId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'token', 'createdAt', 'updatedAt'
+          ])
+          && request.resource.data.token is string
+          && request.resource.data.token.size() <= 4096;
+        allow delete: if isOwner(userId);
+      }
+
       match /farms/{farmId} {
         allow read, create, update, delete: if isOwner(userId);
 

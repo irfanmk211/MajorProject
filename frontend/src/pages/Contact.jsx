@@ -70,7 +70,7 @@ export default function Contact() {
           {[
             { icon: Mail, label: t("Email"), value: "support@agrosmart.ai" },
             { icon: Phone, label: t("Phone"), value: "+91 98765 43210" },
-            { icon: MapPin, label: t("Location"), value: "Pune, Maharashtra, India" },
+            { icon: MapPin, label: t("Location"), value: "Udupi, Karnataka, India" },
           ].map((item, i) => (
             <GlassCard key={item.label} delay={i * 0.1}>
               <div className="flex items-center gap-4">
@@ -86,7 +86,7 @@ export default function Contact() {
           <GlassCard hover={false} className="overflow-hidden p-0">
             <iframe
               title={t("Farm Location")}
-              src="https://maps.google.com/maps?q=Pune,Maharashtra&output=embed"
+              src="https://maps.google.com/maps?q=Udupi,Karnataka,India&output=embed"
               className="h-64 w-full border-0"
               loading="lazy"
             />

@@ -2,15 +2,14 @@ import { Link } from "react-router-dom";
 import { Leaf, Code, Mail, Phone } from "lucide-react";
 import { useLanguage } from "../../context/languageState";
 
-export default function Footer({ sidebarWidth = 260 }) {
+export default function Footer({ collapsed = false }) {
   const { t } = useLanguage();
   return (
     <footer
-      style={{ marginLeft: sidebarWidth }}
-      className="border-t border-slate-200/50 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50"
+      className={`border-t border-slate-200/50 bg-slate-50 dark:border-white/10 dark:bg-slate-900/50 ${collapsed ? "md:ml-[72px]" : "md:ml-[260px]"}`}
     >
-      <div className="mx-auto max-w-7xl px-6 py-12">
-        <div className="grid gap-8 md:grid-cols-4">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <div className="flex items-center gap-2 mb-4">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-agri-500 to-sky-500">

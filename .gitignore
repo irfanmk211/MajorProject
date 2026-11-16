@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.firebase/
 backend/__pycache__/
 *.pyc
 *.keras
