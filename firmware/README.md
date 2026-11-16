@@ -39,7 +39,7 @@ are:
 | Moisture analog input | GPIO 34 |
 | LDR input | GPIO 5 |
 | DHT11 data | GPIO 4 |
-| Motor relay (active-low) | GPIO 27 |
+| Motor relay | GPIO 27 (RELAY_ON_LEVEL: HIGH or LOW) |
 | Wi-Fi indicator assignment (not used by this sketch) | GPIO 2 |
 | RS-485 UART2 RX / TX | GPIO 16 / GPIO 17 |
 | RS-485 driver enable and receiver enable (tied together) | GPIO 18 |

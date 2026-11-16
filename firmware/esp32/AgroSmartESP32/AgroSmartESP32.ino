@@ -36,7 +36,10 @@ constexpr int WIFI_INDICATOR_PIN = 2;
 constexpr int RS485_RX_PIN = 16;
 constexpr int RS485_TX_PIN = 17;
 constexpr int RS485_DE_RE_PIN = 18;
-constexpr int RELAY_ON_LEVEL = LOW;
+// Relay control polarity:
+// Set to HIGH if your relay module turns ON with HIGH (Active-High, standard).
+// Set to LOW if your relay module turns ON with LOW (Active-Low).
+constexpr int RELAY_ON_LEVEL = HIGH;
 
 constexpr int MOISTURE_DRY_ADC = 3500;
 constexpr int MOISTURE_WET_ADC = 1500;
@@ -88,11 +91,12 @@ int wifiReconnectAttempts = 0;
 String lastMoistureBand;
 bool lastReportedMotorOn = false;
 
-void setMotor(bool on) {
-  if (motorOn == on) return;
-  digitalWrite(MOTOR_RELAY_PIN, on == (RELAY_ON_LEVEL == HIGH) ? HIGH : LOW);
+void setMotor(bool on, bool force = false) {
+  if (!force && motorOn == on) return;
+  const int pinLevel = on ? RELAY_ON_LEVEL : (RELAY_ON_LEVEL == HIGH ? LOW : HIGH);
+  digitalWrite(MOTOR_RELAY_PIN, pinLevel);
   motorOn = on;
-  Serial.printf("Motor state: %s\n", motorOn ? "ON" : "OFF");
+  Serial.printf("Motor state: %s (GPIO %d = %s)\n", motorOn ? "ON" : "OFF", MOTOR_RELAY_PIN, pinLevel == HIGH ? "HIGH" : "LOW");
 }
 
 String getDeviceId() {
@@ -500,8 +504,8 @@ void updateIrrigation() {
 
 void setup() {
   Serial.begin(115200);
-  digitalWrite(MOTOR_RELAY_PIN, RELAY_ON_LEVEL == HIGH ? LOW : HIGH);
   pinMode(MOTOR_RELAY_PIN, OUTPUT);
+  setMotor(false, true); // Force relay to safe OFF state immediately at boot
   pinMode(RS485_DE_RE_PIN, OUTPUT);
   digitalWrite(RS485_DE_RE_PIN, LOW);
   pinMode(LDR_PIN, INPUT);
