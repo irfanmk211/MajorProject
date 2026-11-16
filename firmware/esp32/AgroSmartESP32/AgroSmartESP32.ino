@@ -111,6 +111,9 @@ int wifiReconnectAttempts = 0;
 String lastMoistureBand;
 bool lastReportedMotorOn = false;
 
+void setMotor(bool on, bool force = false);
+void handleUnpaired();
+
 void setMotor(bool on, bool force = false) {
   if (!force && motorOn == on) return;
   const int pinLevel = on ? RELAY_ON_LEVEL : (RELAY_ON_LEVEL == HIGH ? LOW : HIGH);
@@ -187,6 +190,12 @@ bool postJson(const String& path, const JsonDocument& body, String* responseBody
     } else {
       Serial.printf("HTTPS request returned HTTP %d.\n", status);
       if (response.length()) Serial.printf("Server response: %s\n", response.c_str());
+      if (status == 401 && !deviceToken.isEmpty() && path != "/api/devices/pair") {
+        http.end();
+        tlsClient.stop();
+        handleUnpaired();
+        return false;
+      }
     }
     http.end();
     tlsClient.stop();
@@ -271,6 +280,30 @@ void attemptPairing() {
   if (lastPairAttemptAt && now - lastPairAttemptAt < PAIR_RETRY_INTERVAL_MS) return;
   lastPairAttemptAt = now;
   pairDevice(pendingPairingCode);
+}
+
+void handleUnpaired() {
+  Serial.println("\n[AGROSMART] Device was unlinked or deleted from account (HTTP 401).");
+  Serial.println("[AGROSMART] Clearing stored credentials and opening setup portal for new pairing code...");
+  setMotor(false, true);
+  deviceToken = "";
+  preferences.remove("deviceToken");
+  lastCommandId = "";
+  preferences.remove("lastCommandId");
+  pendingPairingCode = "";
+  preferences.remove("pairingCode");
+
+  wifiManager.setBreakAfterConfig(true);
+  wifiManager.setConfigPortalTimeout(180);
+  if (wifiManager.startConfigPortal(DEVICE_AP_NAME)) {
+    const char* enteredCode = pairingCodeParameter.getValue();
+    if (enteredCode && strlen(enteredCode) == 12) {
+      pendingPairingCode = String(enteredCode);
+      preferences.putString("pairingCode", pendingPairingCode);
+      Serial.println("New pairing code received! Attempting pair...");
+      attemptPairing();
+    }
+  }
 }
 
 int readMoisturePercent(int* rawValue = nullptr) {
@@ -503,6 +536,12 @@ void pollCommand() {
     if (!deserializeJson(command, http.getString())) applyCommand(command);
   } else if (status > 0) {
     Serial.printf("Command poll returned HTTP %d.\n", status);
+    if (status == 401 && !deviceToken.isEmpty()) {
+      http.end();
+      tlsClient.stop();
+      handleUnpaired();
+      return;
+    }
   } else {
     Serial.printf("Command poll failed: %s\n", http.errorToString(status).c_str());
   }
