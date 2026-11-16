@@ -25,6 +25,27 @@ BBSATNbrdP9JNqPV2Py1PsVq8JQdjDAKBggqhkjOPQQDAwNpADBmAjEA6ED/g94D
 9J+uHXqnLrmvT/aDHQ4thQEd0dlq7A/Cr8deVl5c1RxYIigL9zC2L7F8AjEA8GE8
 p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
 -----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIDdTCCAl2gAwIBAgILBAAAAAABFUtaw5QwDQYJKoZIhvcNAQEFBQAwVzELMAkG
+A1UEBhMCQkUxGTAXBgNVBAoTEEdsb2JhbFNpZ24gbnYtc2ExEDAOBgNVBAsTB1Jv
+b3QgQ0ExGzAZBgNVBAMTEkdsb2JhbFNpZ24gUm9vdCBDQTAeFw05ODA5MDExMjAw
+MDBaFw0yODAxMjgxMjAwMDBaMFcxCzAJBgNVBAYTAkJFMRkwFwYDVQQKExBHbG9i
+YWxTaWduIG52LXNhMRAwDgYDVQQLEwdSb290IENBMRswGQYDVQQDExJHbG9iYWxT
+aWduIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDaDuaZ
+jc6j40+Kfvvxi4Mla+pIH/EqsLmVEQS98GPR4mdmzxzdzxtIK+6NiY6arymAZavp
+xy0Sy6scTHAHoT0KMM0VjU/43dSMUBUc71DuxC73/OlS8pF94G3VNTCOXkNz8kHp
+1Wrjsok6Vjk4bwY8iGlbKk3Fp1S4bInMm/k8yuX9ifUSPJJ4ltbcdG6TRGHRjcdG
+snUOhugZitVtbNV4FpWi6cgKOOvyJBNPc1STE4U6G7weNLWLBYy5d4ux2x8gkasJ
+U26Qzns3dLlwR5EiUWMWea6xrkEmCMgZK9FGqkjWZCrXgzT/LCrBbBlDSgeF59N8
+9iFo7+ryUp9/k5DPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8E
+BTADAQH/MB0GA1UdDgQWBBRge2YaRQ2XyolQL30EzTSo//z9SzANBgkqhkiG9w0B
+AQUFAAOCAQEA1nPnfE920I2/7LqivjTFKDK1fPxsnCwrvQmeU79rXqoRSLblCKOz
+yj1hTdNGCbM+w6DjY1Ub8rrvrTnhQ7k4o+YviiY776BQVvnGCv04zcQLcFGUl5gE
+38NflNUVyRRBnMRddWQVDf9VMOyGj/8N7yy5Y0b2qvzfvGn9LhJIZJrglfCm7ymP
+AbEVtQwdpf5pLGkkeB6zpxxxYu7KyJesF12KwvhHhm4qxFYxldBniYUr+WymXUad
+DKqC5JlR3XC321Y9YeRq4VzW9v493kHMB65jUr9TU/Qr6cf9tveCX4XSQRjbgbME
+HMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==
+-----END CERTIFICATE-----
 )EOF";
 static const char* DEVICE_AP_NAME = "AgroSmart-ESP32-Setup";
 
@@ -114,8 +135,9 @@ String createDeviceToken() {
 }
 
 void configureTls() {
+  tlsClient.stop();
   tlsClient.setCACert(TLS_ROOT_CA_CERT);
-  tlsClient.setTimeout(10000);
+  tlsClient.setTimeout(15000);
 }
 
 bool synchronizeClock() {
@@ -139,13 +161,14 @@ bool postJson(const String& path, const JsonDocument& body, String* responseBody
   }
   Serial.printf("API DNS: %s -> %s\n", API_HOST, serverAddress.toString().c_str());
 
+  tlsClient.stop();
   HTTPClient http;
   const String url = String(API_BASE_URL) + path;
   if (!http.begin(tlsClient, url)) {
     Serial.println("Could not initialize HTTPS request.");
     return false;
   }
-  http.setTimeout(10000);
+  http.setTimeout(15000);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-AgroSmart-Device", deviceId);
   if (deviceToken.length()) http.addHeader("X-AgroSmart-Token", deviceToken);
@@ -166,9 +189,11 @@ bool postJson(const String& path, const JsonDocument& body, String* responseBody
       if (response.length()) Serial.printf("Server response: %s\n", response.c_str());
     }
     http.end();
+    tlsClient.stop();
     return false;
   }
   http.end();
+  tlsClient.stop();
   return true;
 }
 
@@ -185,6 +210,7 @@ void probeApiHealth() {
   }
   Serial.printf("API DNS: %s -> %s\n", API_HOST, serverAddress.toString().c_str());
 
+  tlsClient.stop();
   HTTPClient http;
   if (!http.begin(tlsClient, String(API_BASE_URL) + "/")) {
     Serial.println("API health check: could not initialize HTTPS.");
@@ -204,6 +230,7 @@ void probeApiHealth() {
     Serial.printf("TLS client detail (%d): %s\n", tlsErrorCode, tlsError);
   }
   http.end();
+  tlsClient.stop();
 }
 
 bool pairDevice(const String& pairingCode) {
@@ -464,9 +491,10 @@ void pollCommand() {
   if (WiFi.status() != WL_CONNECTED || deviceToken.isEmpty() || strlen(TLS_ROOT_CA_CERT) == 0) return;
 
   configureTls();
+  tlsClient.stop();
   HTTPClient http;
   if (!http.begin(tlsClient, String(API_BASE_URL) + "/api/devices/command")) return;
-  http.setTimeout(10000);
+  http.setTimeout(15000);
   http.addHeader("X-AgroSmart-Device", deviceId);
   http.addHeader("X-AgroSmart-Token", deviceToken);
   const int status = http.GET();
@@ -479,6 +507,7 @@ void pollCommand() {
     Serial.printf("Command poll failed: %s\n", http.errorToString(status).c_str());
   }
   http.end();
+  tlsClient.stop();
 }
 
 void updateIrrigation() {
