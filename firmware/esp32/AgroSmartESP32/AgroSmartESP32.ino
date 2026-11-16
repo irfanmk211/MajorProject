@@ -581,7 +581,7 @@ void loop() {
 
       if (wifiReconnectAttempts >= WIFI_MAX_RECONNECT_ATTEMPTS) {
         Serial.println("Max reconnect attempts reached — opening WiFi config portal.");
-        Serial.println("Connect to AP '" DEVICE_AP_NAME "' to set new WiFi credentials.");
+        Serial.printf("Connect to AP '%s' to set new WiFi credentials.\n", DEVICE_AP_NAME);
         WiFi.disconnect(true);
         wifiManager.setConfigPortalTimeout(180);   // 3-minute portal timeout
         if (wifiManager.startConfigPortal(DEVICE_AP_NAME)) {
